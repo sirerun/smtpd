@@ -1,0 +1,53 @@
+server:
+  listen_addr: "0.0.0.0"
+  port: 25
+  submission_port: 587
+  max_connections: 1000
+  read_buffer_size: 16384
+  write_buffer_size: 16384
+  read_timeout: 5m
+  write_timeout: 5m
+  idle_timeout: 10m
+  shutdown_timeout: 30s
+  max_message_size: 33554432
+  worker_pool_size: 4
+  connection_backlog: 128
+
+auth:
+  enabled: true
+  users_file: "users.json"
+  auth_methods:
+    - "PLAIN"
+    - "LOGIN"
+
+logging:
+  level: "info"
+  format: "text"
+  output: "stdout"
+
+metrics:
+  enabled: true
+  listen_addr: "0.0.0.0:9090"
+  metrics_path: "/metrics"
+
+plugins:
+  enabled: true
+  paths:
+    - "/etc/smtpd/plugins"
+
+security:
+  tls_enabled: true
+  tls_cert_file: "/etc/smtpd/cert.pem"
+  tls_key_file: "/etc/smtpd/key.pem"
+  rate_limit: 100
+  allowed_ips:
+    - "10.0.0.0/8"
+    - "192.168.0.0/16"
+  blocked_ips:
+    - "1.2.3.4/32"
+  allowed_domains:
+    - "example.com"
+    - "example.org"
+  blocked_domains:
+    - "spam.com"
+    - "malware.org" 
