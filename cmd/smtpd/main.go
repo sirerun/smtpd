@@ -190,6 +190,22 @@ func run(ctx context.Context, args []string) error {
 		logger.Info("TLS enabled")
 	}
 
+	// Validate TLS configuration for submission port
+	if cfg.Server.SubmissionPort > 0 {
+		submissionAddr := fmt.Sprintf("%s:%d", cfg.Server.ListenAddr, cfg.Server.SubmissionPort)
+		if !cfg.Security.TLSEnabled || cfg.Security.TLSCertFile == "" || cfg.Security.TLSKeyFile == "" {
+			logger.Error("TLS configuration is required for submission port",
+				"submission_port", cfg.Server.SubmissionPort,
+				"tls_enabled", cfg.Security.TLSEnabled,
+				"cert_file", cfg.Security.TLSCertFile,
+				"key_file", cfg.Security.TLSKeyFile,
+			)
+			return fmt.Errorf("TLS configuration (enabled, cert, key) is required for submission port %d",
+				cfg.Server.SubmissionPort)
+		}
+		logger.Info("Validated TLS configuration for submission port", "address", submissionAddr)
+	}
+
 	serverConfig := cfg.CreateServerConfig(logger) // Pass logger to CreateServerConfig if needed
 
 	// TODO: Initialize Auth Store based on cfg.Auth, passing logger

@@ -7,13 +7,13 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"log/slog"
 	"net"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/mailtive/smtpd/internal/auth"
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/internal/message"
 	"github.com/mailtive/smtpd/internal/metrics"
 	"github.com/mailtive/smtpd/internal/queue"
@@ -65,7 +65,7 @@ type Session struct {
 	remoteAddr net.Addr
 	ctx        context.Context
 	baseCtx    context.Context
-	logger     *slog.Logger
+	logger     *logging.Logger
 	sessionID  string
 
 	// Timeouts and buffer management
@@ -76,7 +76,7 @@ type Session struct {
 }
 
 // Reset reinitializes a session for reuse
-func (s *Session) Reset(conn net.Conn, q *queue.Queue, tlsConfig *TLSConfig, userStore auth.AuthStore, plugins []plugin.Plugin, logger *slog.Logger, sessionID string) {
+func (s *Session) Reset(conn net.Conn, q *queue.Queue, tlsConfig *TLSConfig, userStore auth.AuthStore, plugins []plugin.Plugin, logger *logging.Logger, sessionID string) {
 	// Set default timeout values if not already set
 	if s.readTimeout == 0 {
 		s.readTimeout = DefaultReadTimeout
@@ -247,7 +247,7 @@ func (s *Session) Handle() error {
 
 // handleHelo processes HELO/EHLO commands
 func (s *Session) handleHelo(command string, domain string) error {
-	s.logger = s.logger.With("helo_domain", domain)
+	s.logger = s.logger.WithFields(map[string]interface{}{"helo_domain": domain})
 	s.logger.Info("HELO/EHLO received", "command", command)
 	s.helo = domain
 	s.state = StateMail
@@ -362,7 +362,9 @@ func (s *Session) handleStartTLS() (bool, error) {
 	s.recipients = nil
 	s.data = nil
 	s.auth = false
-	s.logger = s.logger.With("tls", true)
+
+	// Update the logger with TLS information while maintaining the same type
+	s.logger = s.logger.WithFields(map[string]interface{}{"tls": true})
 
 	return true, nil
 }

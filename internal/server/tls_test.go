@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,31 +16,30 @@ import (
 )
 
 func TestTLSConfig(t *testing.T) {
-	// Create temporary directory for test certificates
-	tempDir, err := ioutil.TempDir("", "tls-test")
-	require.NoError(t, err, "Failed to create temp dir")
+	// Create temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "tls-test")
+	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	// Copy test certificates to temp directory
+	// Read test certificate and key files
+	certData, err := os.ReadFile("testdata/cert.pem")
+	require.NoError(t, err)
+	keyData, err := os.ReadFile("testdata/key.pem")
+	require.NoError(t, err)
+	caData, err := os.ReadFile("testdata/ca.pem")
+	require.NoError(t, err)
+
+	// Write test files to temp directory
 	certFile := filepath.Join(tempDir, "cert.pem")
 	keyFile := filepath.Join(tempDir, "key.pem")
 	caFile := filepath.Join(tempDir, "ca.pem")
 
-	// Read test certificates
-	certData, err := ioutil.ReadFile("testdata/cert.pem")
-	require.NoError(t, err, "Failed to read cert file")
-	keyData, err := ioutil.ReadFile("testdata/key.pem")
-	require.NoError(t, err, "Failed to read key file")
-	caData, err := ioutil.ReadFile("testdata/ca.pem")
-	require.NoError(t, err, "Failed to read ca file")
-
-	// Write test certificates to temp directory
-	err = ioutil.WriteFile(certFile, certData, 0644)
-	require.NoError(t, err, "Failed to write cert file")
-	err = ioutil.WriteFile(keyFile, keyData, 0644)
-	require.NoError(t, err, "Failed to write key file")
-	err = ioutil.WriteFile(caFile, caData, 0644)
-	require.NoError(t, err, "Failed to write ca file")
+	err = os.WriteFile(certFile, certData, 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(keyFile, keyData, 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(caFile, caData, 0644)
+	require.NoError(t, err)
 
 	// Test creating TLS config
 	config, err := NewTLSConfig(certFile, keyFile, caFile)

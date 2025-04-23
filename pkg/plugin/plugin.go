@@ -105,16 +105,3 @@ func (p *BasePlugin) OnDisconnect(ctx context.Context, session *SessionInfo) {
 
 // Ensure BasePlugin implements Plugin
 var _ Plugin = (*BasePlugin)(nil)
-
-// Remove the old BasePlugin methods with the wrong signature.
-// func (p *BasePlugin) OnMailFrom(ctx context.Context, from string, remoteAddr net.Addr) (bool, error) {
-// 	return true, nil
-// }
-//
-// func (p *BasePlugin) OnRcptTo(ctx context.Context, to string, remoteAddr net.Addr) (bool, error) {
-// 	return true, nil
-// }
-//
-// func (p *BasePlugin) OnData(ctx context.Context, data []byte, remoteAddr net.Addr) (bool, error) {
-// 	return true, nil
-// }

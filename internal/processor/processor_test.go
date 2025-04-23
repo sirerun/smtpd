@@ -2,18 +2,16 @@ package processor
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/mailtive/smtpd/internal/errors"
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/internal/message"
-	"github.com/mailtive/smtpd/internal/outbound"
-	"github.com/mailtive/smtpd/internal/queue"
+	"github.com/mailtive/smtpd/internal/metrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,14 +35,14 @@ func (mq *mockQueue) Enqueue(msg *message.Message) error {
 	mq.mu.Lock()
 	if mq.closed {
 		mq.mu.Unlock()
-		return queue.ErrQueueClosed
+		return errors.NewControlledStop(context.Canceled)
 	}
 	mq.mu.Unlock()
 	select {
 	case mq.dequeueChan <- msg:
 		return nil
 	case <-time.After(100 * time.Millisecond):
-		return errors.New("mock Enqueue timed out")
+		return fmt.Errorf("mock Enqueue timed out")
 	}
 }
 
@@ -52,14 +50,14 @@ func (mq *mockQueue) Requeue(msg *message.Message) error {
 	mq.mu.Lock()
 	if mq.closed {
 		mq.mu.Unlock()
-		return queue.ErrQueueClosed
+		return errors.NewControlledStop(context.Canceled)
 	}
 	mq.mu.Unlock()
 	select {
 	case mq.requeueChan <- msg:
 		return nil
 	case <-time.After(100 * time.Millisecond):
-		return errors.New("mock Requeue timed out")
+		return fmt.Errorf("mock Requeue timed out")
 	}
 }
 
@@ -67,7 +65,7 @@ func (mq *mockQueue) Dequeue(ctx context.Context) (*message.Message, error) {
 	select {
 	case msg, ok := <-mq.dequeueChan:
 		if !ok {
-			return nil, queue.ErrQueueClosed
+			return nil, errors.NewControlledStop(context.Canceled)
 		}
 		return msg, nil
 	case <-ctx.Done():
@@ -87,7 +85,7 @@ func (mq *mockQueue) Close() {
 
 // mockDeliverer simulates the Deliverer interface.
 type mockDeliverer struct {
-	deliverFunc func(*message.Message) map[string]outbound.DomainDeliveryStatus
+	deliverFunc func(context.Context, *message.Message) error
 	mu          sync.Mutex
 	calls       map[string]int // Store call count per message ID
 }
@@ -98,24 +96,15 @@ func newMockDeliverer() *mockDeliverer {
 	}
 }
 
-func (md *mockDeliverer) Deliver(msg *message.Message) map[string]outbound.DomainDeliveryStatus {
+func (md *mockDeliverer) Deliver(ctx context.Context, msg *message.Message) error {
 	md.mu.Lock()
 	md.calls[msg.ID]++ // Increment call count for this message ID
 	md.mu.Unlock()
 	if md.deliverFunc != nil {
-		return md.deliverFunc(msg)
+		return md.deliverFunc(ctx, msg)
 	}
 	// Default success
-	status := make(map[string]outbound.DomainDeliveryStatus)
-	for _, rcpt := range msg.To {
-		if strings.Contains(rcpt, "@") {
-			domain := strings.Split(rcpt, "@")[1]
-			if _, exists := status[domain]; !exists {
-				status[domain] = outbound.DomainDeliveryStatus{Domain: domain, Result: outbound.DeliverySuccess, Detail: "Mock success"}
-			}
-		}
-	}
-	return status
+	return nil
 }
 
 func (md *mockDeliverer) GetCallCount(msgID string) int {
@@ -125,7 +114,8 @@ func (md *mockDeliverer) GetCallCount(msgID string) int {
 }
 
 // --- Helper ---
-var testLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})) // Reduce log noise for tests
+var testLogger = logging.New(logging.DefaultConfig()) // Reduce log noise for tests
+var testMetrics = metrics.NewMetrics()
 
 // --- Test Suite ---
 
@@ -133,11 +123,11 @@ func TestQueueProcessor_Run_SingleWorker_SimpleCases(t *testing.T) {
 	// Test Success
 	mqSuccess := newMockQueue(1)
 	mdSuccess := newMockDeliverer()
-	pSuccess := NewQueueProcessor(mqSuccess, mdSuccess, 1, testLogger)
+	pSuccess := NewQueueProcessor(mqSuccess, mdSuccess, 1, testLogger, testMetrics)
 	pSuccess.Start()
 	msgSuccess := &message.Message{ID: "success-1", From: "a@a.com", To: []string{"b@b.com"}}
-	mdSuccess.deliverFunc = func(m *message.Message) map[string]outbound.DomainDeliveryStatus {
-		return map[string]outbound.DomainDeliveryStatus{"b.com": {Result: outbound.DeliverySuccess}}
+	mdSuccess.deliverFunc = func(ctx context.Context, m *message.Message) error {
+		return nil
 	}
 	require.NoError(t, mqSuccess.Enqueue(msgSuccess))
 	time.Sleep(50 * time.Millisecond) // Allow processing
@@ -149,11 +139,11 @@ func TestQueueProcessor_Run_SingleWorker_SimpleCases(t *testing.T) {
 	// Test TempFail -> Requeue
 	mqRetry := newMockQueue(1)
 	mdRetry := newMockDeliverer()
-	pRetry := NewQueueProcessor(mqRetry, mdRetry, 1, testLogger)
+	pRetry := NewQueueProcessor(mqRetry, mdRetry, 1, testLogger, testMetrics)
 	pRetry.Start()
 	msgRetry := &message.Message{ID: "retry-1", From: "c@c.com", To: []string{"d@temp.com"}}
-	mdRetry.deliverFunc = func(m *message.Message) map[string]outbound.DomainDeliveryStatus {
-		return map[string]outbound.DomainDeliveryStatus{"temp.com": {Result: outbound.DeliveryTempFail}}
+	mdRetry.deliverFunc = func(ctx context.Context, m *message.Message) error {
+		return fmt.Errorf("temporary failure")
 	}
 	require.NoError(t, mqRetry.Enqueue(msgRetry))
 	time.Sleep(50 * time.Millisecond)
@@ -173,11 +163,11 @@ func TestQueueProcessor_Run_SingleWorker_SimpleCases(t *testing.T) {
 	// Test PermFail -> Bounce (No Requeue)
 	mqPerm := newMockQueue(1)
 	mdPerm := newMockDeliverer()
-	pPerm := NewQueueProcessor(mqPerm, mdPerm, 1, testLogger)
+	pPerm := NewQueueProcessor(mqPerm, mdPerm, 1, testLogger, testMetrics)
 	pPerm.Start()
 	msgPerm := &message.Message{ID: "perm-1", From: "e@e.com", To: []string{"f@perm.com"}}
-	mdPerm.deliverFunc = func(m *message.Message) map[string]outbound.DomainDeliveryStatus {
-		return map[string]outbound.DomainDeliveryStatus{"perm.com": {Result: outbound.DeliveryPermFail}}
+	mdPerm.deliverFunc = func(ctx context.Context, m *message.Message) error {
+		return fmt.Errorf("permanent failure")
 	}
 	require.NoError(t, mqPerm.Enqueue(msgPerm))
 	time.Sleep(50 * time.Millisecond)
@@ -194,7 +184,7 @@ func TestQueueProcessor_ParallelRun_Counts(t *testing.T) {
 	numWorkers := 4
 	numMessages := 30 // Increase message count for better concurrency test
 
-	p := NewQueueProcessor(mq, md, numWorkers, testLogger)
+	p := NewQueueProcessor(mq, md, numWorkers, testLogger, testMetrics)
 	p.Start()
 
 	var wg sync.WaitGroup
@@ -204,20 +194,20 @@ func TestQueueProcessor_ParallelRun_Counts(t *testing.T) {
 	expectedPermFails := make(map[string]bool)
 	var mu sync.Mutex
 
-	md.deliverFunc = func(m *message.Message) map[string]outbound.DomainDeliveryStatus {
+	md.deliverFunc = func(ctx context.Context, m *message.Message) error {
 		defer wg.Done()
 		if strings.HasPrefix(m.ID, "temp-") {
 			mu.Lock()
 			expectedRequeues[m.ID] = true
 			mu.Unlock()
-			return map[string]outbound.DomainDeliveryStatus{"temp.com": {Result: outbound.DeliveryTempFail}}
+			return fmt.Errorf("temporary failure")
 		} else if strings.HasPrefix(m.ID, "perm-") {
 			mu.Lock()
 			expectedPermFails[m.ID] = true
 			mu.Unlock()
-			return map[string]outbound.DomainDeliveryStatus{"perm.com": {Result: outbound.DeliveryPermFail}}
+			return fmt.Errorf("permanent failure")
 		} else {
-			return map[string]outbound.DomainDeliveryStatus{"success.com": {Result: outbound.DeliverySuccess}}
+			return nil
 		}
 	}
 

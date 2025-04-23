@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"time"
 
@@ -10,7 +9,6 @@ import (
 
 	"github.com/mailtive/smtpd/internal/auth"
 	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/internal/server"
 	"github.com/mailtive/smtpd/pkg/plugin"
 )
 
@@ -22,6 +20,7 @@ type Config struct {
 	Metrics  MetricsConfig  `json:"metrics" yaml:"metrics"`
 	Plugins  PluginsConfig  `json:"plugins" yaml:"plugins"`
 	Security SecurityConfig `json:"security" yaml:"security"`
+	Outbound OutboundConfig `json:"outbound" yaml:"outbound"`
 }
 
 // ServerConfig holds server-specific configuration
@@ -39,6 +38,8 @@ type ServerConfig struct {
 	MaxMessageSize    int64         `json:"max_message_size" yaml:"max_message_size"`
 	WorkerPoolSize    int           `json:"worker_pool_size" yaml:"worker_pool_size"`
 	ConnectionBacklog int           `json:"connection_backlog" yaml:"connection_backlog"`
+	LocalDomains      []string      `json:"local_domains" yaml:"local_domains"`
+	Hostname          string        `json:"hostname" yaml:"hostname"`
 }
 
 // AuthConfig holds authentication configuration
@@ -81,6 +82,25 @@ type SecurityConfig struct {
 	BlockedDomains []string `json:"blocked_domains" yaml:"blocked_domains"`
 }
 
+// OutboundConfig holds configuration for outbound mail delivery
+type OutboundConfig struct {
+	SMTPClient SMTPClientConfig      `json:"smtp_client" yaml:"smtp_client"`
+	DKIM       map[string]DKIMConfig `json:"dkim" yaml:"dkim"`
+}
+
+// SMTPClientConfig holds configuration for outbound SMTP client connections
+type SMTPClientConfig struct {
+	ConnectTimeout time.Duration `json:"connect_timeout" yaml:"connect_timeout"`
+	MaxConnections int           `json:"max_connections" yaml:"max_connections"`
+	IdleTimeout    time.Duration `json:"idle_timeout" yaml:"idle_timeout"`
+}
+
+// DKIMConfig holds configuration for DKIM signing
+type DKIMConfig struct {
+	Selector       string `json:"selector" yaml:"selector"`
+	PrivateKeyPath string `json:"private_key_path" yaml:"private_key_path"`
+}
+
 // DefaultConfig returns a default configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -98,6 +118,8 @@ func DefaultConfig() *Config {
 			MaxMessageSize:    32 * 1024 * 1024,
 			WorkerPoolSize:    4,
 			ConnectionBacklog: 128,
+			LocalDomains:      []string{},
+			Hostname:          "",
 		},
 		Auth: AuthConfig{
 			Enabled:     false,
@@ -129,24 +151,30 @@ func DefaultConfig() *Config {
 			AllowedDomains: []string{},
 			BlockedDomains: []string{},
 		},
+		Outbound: OutboundConfig{
+			SMTPClient: SMTPClientConfig{
+				ConnectTimeout: 10 * time.Second,
+				MaxConnections: 100,
+				IdleTimeout:    5 * time.Minute,
+			},
+			DKIM: map[string]DKIMConfig{},
+		},
 	}
 }
 
-// LoadConfig loads configuration from a file, applying defaults first.
+// LoadConfig loads the configuration from a file.
 func LoadConfig(configFile string) (*Config, error) {
+	if configFile == "" {
+		return DefaultConfig(), nil
+	}
+
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
 	// Start with defaults
 	config := DefaultConfig()
-
-	// If no file specified, return defaults
-	if configFile == "" {
-		return config, nil
-	}
-
-	// Load from file and overwrite defaults
-	data, err := ioutil.ReadFile(configFile)
-	if err != nil {
-		return nil, fmt.Errorf("error reading config file '%s': %w", configFile, err)
-	}
 
 	// Unmarshal YAML data into the existing config struct (overwriting defaults)
 	if err := yaml.Unmarshal(data, config); err != nil {
@@ -181,32 +209,63 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// CreateServerConfig creates a server.ServerConfig from the config
-func (c *Config) CreateServerConfig(logger *logging.Logger) *server.ServerConfig {
-	return &server.ServerConfig{
-		MaxConnections:    c.Server.MaxConnections,
-		ReadBufferSize:    c.Server.ReadBufferSize,
-		WriteBufferSize:   c.Server.WriteBufferSize,
-		ReadTimeout:       c.Server.ReadTimeout,
-		WriteTimeout:      c.Server.WriteTimeout,
-		IdleTimeout:       c.Server.IdleTimeout,
-		ShutdownTimeout:   c.Server.ShutdownTimeout,
-		MaxMessageSize:    c.Server.MaxMessageSize,
-		WorkerPoolSize:    c.Server.WorkerPoolSize,
-		ConnectionBacklog: c.Server.ConnectionBacklog,
-	}
-}
-
 // CreateAuthStore creates an auth.Store from the config
-func (c *Config) CreateAuthStore(logger *logging.Logger) (*auth.Store, error) {
+func (c *Config) CreateAuthStore(logger *logging.Logger) (auth.AuthStore, error) {
 	if !c.Auth.Enabled {
+		if logger != nil {
+			logger.Info("Authentication disabled")
+		}
 		return nil, nil
 	}
 
 	store := auth.NewStore()
 
-	if logger != nil {
-		logger.Debug("Loading users for auth store", "file", c.Auth.UsersFile)
+	// Only attempt to load users if a file is specified
+	if c.Auth.UsersFile != "" {
+		if logger != nil {
+			logger.Debug("Loading users for auth store", "file", c.Auth.UsersFile)
+		}
+
+		data, err := os.ReadFile(c.Auth.UsersFile)
+		if err != nil {
+			if logger != nil {
+				logger.Error("Failed to read users file", "file", c.Auth.UsersFile, "error", err)
+			}
+			return nil, fmt.Errorf("failed to read users file: %w", err)
+		}
+
+		var users []struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+
+		if err := yaml.Unmarshal(data, &users); err != nil {
+			if logger != nil {
+				logger.Error("Failed to parse users file", "file", c.Auth.UsersFile, "error", err)
+			}
+			return nil, fmt.Errorf("failed to parse users file: %w", err)
+		}
+
+		for _, user := range users {
+			if err := store.AddUser(user.Username, user.Password); err != nil {
+				if logger != nil {
+					logger.Error("Failed to add user", "username", user.Username, "error", err)
+				}
+				// Continue adding other users even if one fails
+				continue
+			}
+			if logger != nil {
+				logger.Debug("Added user", "username", user.Username)
+			}
+		}
+
+		if logger != nil {
+			logger.Info("Auth store initialized", "users_count", len(users))
+		}
+	} else {
+		if logger != nil {
+			logger.Warn("Auth is enabled but no users file specified")
+		}
 	}
 
 	return store, nil

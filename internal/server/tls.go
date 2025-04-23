@@ -4,18 +4,21 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"io/ioutil"
+	"fmt"
+	"os"
 )
 
 // TLSConfig holds the configuration for TLS
 type TLSConfig struct {
-	CertFile string
-	KeyFile  string
-	CAFile   string
+	CertFile string // Path to the certificate file
+	KeyFile  string // Path to the private key file
+	// CAFile is only needed if client certificate validation is required
+	// This can be omitted for most typical SMTP server deployments
+	CAFile string
 }
 
 // NewTLSConfig creates a new TLS configuration
-func NewTLSConfig(certFile, keyFile, caFile string) (*TLSConfig, error) {
+func NewTLSConfig(certFile, keyFile string) (*TLSConfig, error) {
 	if certFile == "" || keyFile == "" {
 		return nil, errors.New("certificate and key files are required")
 	}
@@ -23,7 +26,6 @@ func NewTLSConfig(certFile, keyFile, caFile string) (*TLSConfig, error) {
 	return &TLSConfig{
 		CertFile: certFile,
 		KeyFile:  keyFile,
-		CAFile:   caFile,
 	}, nil
 }
 
@@ -51,20 +53,37 @@ func (c *TLSConfig) CreateTLSConfig() (*tls.Config, error) {
 		},
 	}
 
+	// Only configure client certificate validation if CAFile is specified
 	if c.CAFile != "" {
-		caCert, err := ioutil.ReadFile(c.CAFile)
+		caCert, err := c.LoadCA()
 		if err != nil {
 			return nil, err
 		}
 
-		caCertPool := x509.NewCertPool()
-		if !caCertPool.AppendCertsFromPEM(caCert) {
-			return nil, errors.New("failed to append CA certificate")
+		if caCert != nil {
+			config.ClientCAs = caCert
+			config.ClientAuth = tls.RequireAndVerifyClientCert
 		}
-
-		config.ClientCAs = caCertPool
-		config.ClientAuth = tls.RequireAndVerifyClientCert
 	}
 
 	return config, nil
+}
+
+// LoadCA loads the CA certificate from file.
+func (c *TLSConfig) LoadCA() (*x509.CertPool, error) {
+	if c.CAFile == "" {
+		return nil, nil
+	}
+
+	caCert, err := os.ReadFile(c.CAFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+	}
+
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(caCert) {
+		return nil, errors.New("failed to append CA certificate")
+	}
+
+	return caCertPool, nil
 }

@@ -3,438 +3,385 @@ package outbound
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/smtp"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
 
-// SMTPClientConfig holds configuration for the SMTP client
+// SMTPClientConfig holds configuration for SMTP clients.
 type SMTPClientConfig struct {
-	// Connection settings
-	DialTimeout    time.Duration // Timeout for initial connection
-	CommandTimeout time.Duration // Timeout for SMTP commands
-	MaxConnections int           // Maximum number of concurrent connections per host
-	MaxMessageSize int64         // Maximum message size to advertise in EHLO
-	ForceTLS       bool          // Whether to require TLS
-	SkipVerify     bool          // Whether to skip TLS certificate verification
-	LocalName      string        // Local hostname to use in HELO/EHLO
-	Auth           smtp.Auth     // Optional authentication credentials
+	ConnectTimeout time.Duration
+	SendTimeout    time.Duration
+	IdleTimeout    time.Duration // Time before an idle connection is closed
+	MaxConnections int           // Max connections per host in the pool
+	TLSEnabled     bool          // Whether to attempt STARTTLS
+	TLSConfig      *tls.Config   // Custom TLS config (optional)
+	HeloHostname   string
 }
 
-// DefaultSMTPClientConfig returns default configuration
-func DefaultSMTPClientConfig() *SMTPClientConfig {
-	return &SMTPClientConfig{
-		DialTimeout:    30 * time.Second,
-		CommandTimeout: 5 * time.Minute,
-		MaxConnections: 5,
-		MaxMessageSize: 32 * 1024 * 1024, // 32MB
-		ForceTLS:       false,
-		SkipVerify:     false,
-		LocalName:      "localhost",
+// DefaultSMTPClientConfig returns a default configuration.
+func DefaultSMTPClientConfig() SMTPClientConfig {
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "localhost.localdomain"
+	}
+	return SMTPClientConfig{
+		ConnectTimeout: 10 * time.Second,
+		SendTimeout:    30 * time.Second,
+		IdleTimeout:    5 * time.Minute,
+		MaxConnections: 10,
+		TLSEnabled:     true,
+		HeloHostname:   hostname,
 	}
 }
 
-// SMTPClient represents a connection to an SMTP server
+// SMTPClient represents a connection to a single SMTP server.
+// It implements the SMTPClientInterface.
 type SMTPClient struct {
-	conn         net.Conn
-	client       interface{} // Changed from *smtp.Client to interface{} for testing
-	host         string
-	config       *SMTPClientConfig
-	capabilities map[string]bool
-	mockSendFunc func(from string, to []string, msg []byte) error // for testing
+	config SMTPClientConfig
+	host   string // Target host (e.g., "mx.example.com")
+	client *smtp.Client
+	conn   net.Conn
+	logger LoggerInterface // Add logger
+	mu     sync.Mutex      // Mutex to protect concurrent Send/Close operations on the same client
 }
 
-// SMTPClientPool manages a pool of SMTP clients
-type SMTPClientPool struct {
-	config     *SMTPClientConfig
-	clients    map[string][]*SMTPClient
-	mu         sync.Mutex
-	mockClient smtpClient                                                  // for testing
-	newClient  func(ctx context.Context, host string) (*SMTPClient, error) // for testing
-}
-
-// NewSMTPClientPool creates a new pool of SMTP clients
-func NewSMTPClientPool(config *SMTPClientConfig) *SMTPClientPool {
-	if config == nil {
-		config = DefaultSMTPClientConfig()
+// newSMTPClient creates and initializes a new SMTP client connection.
+func newSMTPClient(ctx context.Context, host string, config SMTPClientConfig, dialer Dialer, logger LoggerInterface) (*SMTPClient, error) {
+	addr := host
+	if !strings.Contains(addr, ":") {
+		addr = net.JoinHostPort(addr, "25")
 	}
 
-	pool := &SMTPClientPool{
-		config:  config,
-		clients: make(map[string][]*SMTPClient),
-	}
-
-	// Set the default newClient implementation
-	pool.newClient = pool.createNewClient
-
-	return pool
-}
-
-// GetClient gets or creates an SMTP client for the given host
-func (p *SMTPClientPool) GetClient(ctx context.Context, host string) (*SMTPClient, error) {
-	// If we have a mock client for testing, create a wrapper that uses it
-	if p.mockClient != nil {
-		return &SMTPClient{
-			host:   host,
-			config: p.config,
-			mockSendFunc: func(from string, to []string, msg []byte) error {
-				return p.mockClient.SendMail(host, nil, from, to, msg)
-			},
-		}, nil
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Check for available client in pool
-	if clients, ok := p.clients[host]; ok {
-		for i, client := range clients {
-			if client != nil {
-				// Remove from pool
-				p.clients[host] = append(clients[:i], clients[i+1:]...)
-				return client, nil
-			}
-		}
-	}
-
-	// Create new client using the newClient function
-	return p.newClient(ctx, host)
-}
-
-// ReturnClient returns a client to the pool
-func (p *SMTPClientPool) ReturnClient(client *SMTPClient) {
-	if client == nil {
-		return
-	}
-
-	// Handle mock clients - don't try to pool them
-	if _, ok := client.client.(*MockSMTPClient); ok {
-		client.Close()
-		return
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Initialize map if nil
-	if p.clients == nil {
-		p.clients = make(map[string][]*SMTPClient)
-	}
-
-	// Check if pool is full
-	clients := p.clients[client.host]
-	if len(clients) >= p.config.MaxConnections {
-		client.Close()
-		return
-	}
-
-	// Return to pool
-	p.clients[client.host] = append(clients, client)
-}
-
-// createNewClient is the default implementation for creating a new SMTP client
-func (p *SMTPClientPool) createNewClient(ctx context.Context, host string) (*SMTPClient, error) {
-	// Create dialer with timeout
-	dialer := &net.Dialer{
-		Timeout: p.config.DialTimeout,
-	}
-
-	// Connect to server
-	conn, err := dialer.DialContext(ctx, "tcp", host)
+	logger.Debug("Dialing SMTP server", "address", addr)
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to %s: %w", host, err)
+		logger.Error("Failed to dial SMTP server", "address", addr, "error", err)
+		return nil, fmt.Errorf("failed to dial %s: %w", addr, err)
 	}
+	logger.Debug("Successfully connected", "address", addr)
 
-	// Set deadline for initial connection
-	conn.SetDeadline(time.Now().Add(p.config.CommandTimeout))
-	defer conn.SetDeadline(time.Time{}) // Clear deadline after initial setup
+	connectDeadline := time.Now().Add(config.ConnectTimeout)
+	conn.SetDeadline(connectDeadline)
+	defer conn.SetDeadline(time.Time{})
 
-	// Create SMTP client
-	client, err := smtp.NewClient(conn, host)
+	c, err := smtp.NewClient(conn, host)
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("failed to create SMTP client: %w", err)
+		logger.Error("Failed to create SMTP client", "host", host, "error", err)
+		return nil, fmt.Errorf("failed to create smtp client for %s: %w", host, err)
 	}
+	logger.Debug("SMTP client created", "host", host)
 
-	// Create our wrapper
-	smtpClient := &SMTPClient{
-		conn:         conn,
-		client:       client,
-		host:         host,
-		config:       p.config,
-		capabilities: make(map[string]bool),
+	logger.Debug("Sending HELO/EHLO", "host", host, "helo_name", config.HeloHostname)
+	if err := c.Hello(config.HeloHostname); err != nil {
+		c.Close()
+		logger.Error("HELO/EHLO failed", "host", host, "error", err)
+		return nil, fmt.Errorf("failed HELO/EHLO to %s: %w", host, err)
 	}
+	logger.Debug("HELO/EHLO successful", "host", host)
 
-	// Perform EHLO/HELO
-	if err := smtpClient.hello(); err != nil {
-		smtpClient.Close()
-		return nil, err
-	}
-
-	// Check for STARTTLS
-	if p.config.ForceTLS || smtpClient.HasCapability("STARTTLS") {
-		if err := smtpClient.startTLS(); err != nil {
-			smtpClient.Close()
-			return nil, err
-		}
-	}
-
-	// Authenticate if configured
-	if p.config.Auth != nil && smtpClient.HasCapability("AUTH") {
-		// Use type assertion to get the real smtp.Client
-		realClient, ok := smtpClient.client.(*smtp.Client)
-		if !ok {
-			smtpClient.Close()
-			return nil, fmt.Errorf("unexpected client type for authentication")
-		}
-
-		if err := realClient.Auth(p.config.Auth); err != nil {
-			smtpClient.Close()
-			return nil, fmt.Errorf("authentication failed: %w", err)
-		}
-	}
-
-	return smtpClient, nil
-}
-
-// hello performs EHLO/HELO
-func (c *SMTPClient) hello() error {
-	// Handle mock client for tests
-	if mockClient, ok := c.client.(*MockSMTPClient); ok {
-		// For tests, just set capabilities based on the mock
-		caps, err := mockClient.EHLO(c.config.LocalName)
-		if err != nil {
-			// Fall back to HELO
-			if err := mockClient.Hello(c.config.LocalName); err != nil {
-				return fmt.Errorf("HELO failed: %w", err)
+	if config.TLSEnabled {
+		logger.Debug("Checking for STARTTLS support", "host", host)
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			logger.Info("Attempting STARTTLS", "host", host)
+			tlsConfig := config.TLSConfig
+			if tlsConfig == nil {
+				tlsConfig = &tls.Config{
+					ServerName: host,
+					MinVersion: tls.VersionTLS12,
+				}
+			} else {
+				if tlsConfig.ServerName == "" {
+					tlsConfig.ServerName = host
+				}
 			}
-			return nil
+
+			conn.SetDeadline(time.Now().Add(config.ConnectTimeout))
+			err = c.StartTLS(tlsConfig)
+			conn.SetDeadline(time.Time{})
+
+			if err != nil {
+				c.Close()
+				logger.Error("STARTTLS failed", "host", host, "error", err)
+				return nil, fmt.Errorf("STARTTLS failed for %s: %w", host, err)
+			}
+			logger.Info("STARTTLS successful", "host", host)
+
+			logger.Debug("Sending HELO/EHLO after STARTTLS", "host", host)
+			if err := c.Hello(config.HeloHostname); err != nil {
+				c.Close()
+				logger.Error("HELO/EHLO after STARTTLS failed", "host", host, "error", err)
+				return nil, fmt.Errorf("failed HELO/EHLO after STARTTLS to %s: %w", host, err)
+			}
+			logger.Debug("HELO/EHLO after STARTTLS successful", "host", host)
+		} else {
+			logger.Info("STARTTLS not supported by server", "host", host)
 		}
-		for _, cap := range caps {
-			c.capabilities[cap] = true
-		}
-		return nil
 	}
 
-	// Real implementation for smtp.Client
-	smtpClient, ok := c.client.(*smtp.Client)
-	if !ok {
-		return fmt.Errorf("client is not a valid SMTP client")
-	}
-
-	// Try EHLO first
-	if err := smtpClient.Hello(c.config.LocalName); err != nil {
-		// Fall back to HELO
-		if err := smtpClient.Hello(c.config.LocalName); err != nil {
-			return fmt.Errorf("HELO failed: %w", err)
-		}
-	}
-
-	// Get capabilities
-	if supported, _ := smtpClient.Extension("STARTTLS"); supported {
-		c.capabilities["STARTTLS"] = true
-	}
-	if supported, _ := smtpClient.Extension("AUTH"); supported {
-		c.capabilities["AUTH"] = true
-	}
-
-	return nil
+	return &SMTPClient{
+		config: config,
+		host:   host,
+		client: c,
+		conn:   conn,
+		logger: logger.WithComponent(fmt.Sprintf("smtp_client(%s)", host)),
+	}, nil
 }
 
-// startTLS upgrades the connection to TLS
-func (c *SMTPClient) startTLS() error {
-	// Handle mock client for tests
-	if mockClient, ok := c.client.(*MockSMTPClient); ok {
-		// For tests, call the mock startTLS which may return an error
-		if err := mockClient.StartTLS(nil); err != nil {
-			return fmt.Errorf("STARTTLS failed: %w", err)
-		}
-		return nil
-	}
-
-	// Real implementation for smtp.Client
-	smtpClient, ok := c.client.(*smtp.Client)
-	if !ok {
-		return fmt.Errorf("client is not a valid SMTP client")
-	}
-
-	tlsConfig := &tls.Config{
-		ServerName:         strings.Split(c.host, ":")[0],
-		InsecureSkipVerify: c.config.SkipVerify,
-	}
-
-	if err := smtpClient.StartTLS(tlsConfig); err != nil {
-		return fmt.Errorf("STARTTLS failed: %w", err)
-	}
-
-	return nil
-}
-
-// HasCapability checks if the server supports a capability
-func (c *SMTPClient) HasCapability(cap string) bool {
-	return c.capabilities[strings.ToUpper(cap)]
-}
-
-// Send sends a message
+// Send sends an email using the established connection.
 func (c *SMTPClient) Send(from string, to []string, msg []byte) error {
-	// If we have a mock function for testing, use it
-	if c.mockSendFunc != nil {
-		return c.mockSendFunc(from, to, msg)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.client == nil || c.conn == nil {
+		return errors.New("SMTP client is closed or not initialized")
 	}
 
-	// Handle mock client for tests
-	if mockClient, ok := c.client.(*MockSMTPClient); ok {
-		if err := mockClient.Mail(from); err != nil {
-			return fmt.Errorf("MAIL FROM failed: %w", err)
-		}
+	var deadline time.Time
+	if c.config.SendTimeout > 0 {
+		deadline = time.Now().Add(c.config.SendTimeout)
+		c.conn.SetDeadline(deadline)
+		defer c.conn.SetDeadline(time.Time{})
+	}
+	c.logger.Debug("Starting message transmission", "from", from, "to_count", len(to))
 
-		for _, addr := range to {
-			if err := mockClient.Rcpt(addr); err != nil {
-				return fmt.Errorf("RCPT TO failed for %s: %w", addr, err)
-			}
-		}
-
-		writer, err := mockClient.Data()
-		if err != nil {
-			return fmt.Errorf("DATA command failed: %w", err)
-		}
-
-		if _, err := writer.Write(msg); err != nil {
-			return fmt.Errorf("writing message failed: %w", err)
-		}
-
-		if err := writer.Close(); err != nil {
-			return fmt.Errorf("closing message failed: %w", err)
-		}
-
-		return nil
+	if err := c.client.Reset(); err != nil {
+		c.logger.Error("Failed to reset SMTP client state, closing connection", "error", err)
+		_ = c.Close()
+		return fmt.Errorf("failed to reset SMTP client state: %w", err)
 	}
 
-	// Real implementation for smtp.Client
-	smtpClient, ok := c.client.(*smtp.Client)
-	if !ok {
-		return fmt.Errorf("client is not a valid SMTP client")
+	c.logger.Debug("Sending MAIL FROM", "from", from)
+	if err := c.client.Mail(from); err != nil {
+		c.logger.Error("MAIL FROM command failed", "from", from, "error", err)
+		return fmt.Errorf("MAIL FROM %s failed: %w", from, err)
 	}
 
-	// Set deadline for the entire send operation
-	c.conn.SetDeadline(time.Now().Add(c.config.CommandTimeout))
-	defer c.conn.SetDeadline(time.Time{})
-
-	// Send MAIL FROM
-	if err := smtpClient.Mail(from); err != nil {
-		return fmt.Errorf("MAIL FROM failed: %w", err)
-	}
-
-	// Send RCPT TO for each recipient
 	for _, addr := range to {
-		if err := smtpClient.Rcpt(addr); err != nil {
-			return fmt.Errorf("RCPT TO failed for %s: %w", addr, err)
+		c.logger.Debug("Sending RCPT TO", "recipient", addr)
+		if err := c.client.Rcpt(addr); err != nil {
+			c.logger.Warn("RCPT TO command failed for recipient", "recipient", addr, "error", err)
+			return fmt.Errorf("RCPT TO %s failed: %w", addr, err)
 		}
 	}
+	c.logger.Debug("All RCPT TO commands successful")
 
-	// Send DATA
-	w, err := smtpClient.Data()
+	c.logger.Debug("Sending DATA command")
+	w, err := c.client.Data()
 	if err != nil {
+		c.logger.Error("DATA command failed", "error", err)
 		return fmt.Errorf("DATA command failed: %w", err)
 	}
-	if _, err := w.Write(msg); err != nil {
-		return fmt.Errorf("writing message failed: %w", err)
+	c.logger.Debug("Writing message data")
+	_, err = w.Write(msg)
+	if err != nil {
+		_ = w.Close()
+		c.logger.Error("Failed writing message data", "error", err)
+		return fmt.Errorf("failed writing message data: %w", err)
 	}
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("closing message failed: %w", err)
+	c.logger.Debug("Closing data writer")
+	err = w.Close()
+	if err != nil {
+		c.logger.Error("Failed closing data writer", "error", err)
+		return fmt.Errorf("failed closing data writer: %w", err)
 	}
 
+	c.logger.Info("Message transmission successful")
 	return nil
 }
 
-// Close closes the connection
+// Close closes the SMTP connection gracefully.
 func (c *SMTPClient) Close() error {
-	// Handle mock client for tests
-	if mockClient, ok := c.client.(*MockSMTPClient); ok {
-		if mockClient != nil {
-			mockClient.Quit()
-		}
-		c.client = nil
-		c.conn = nil
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.client == nil {
+		c.logger.Debug("Client already closed or not initialized")
 		return nil
 	}
 
-	// Real implementation for smtp.Client
-	if smtpClient, ok := c.client.(*smtp.Client); ok && smtpClient != nil {
-		smtpClient.Quit()
+	c.logger.Debug("Closing SMTP client connection")
+	errQuit := c.client.Quit()
+	if errQuit != nil {
+		c.logger.Warn("QUIT command failed, closing connection directly", "error", errQuit)
 	}
 
-	if c.conn != nil {
-		c.conn.Close()
-	}
-
-	// Make sure all fields are properly set to nil
+	errClose := c.client.Close()
 	c.client = nil
 	c.conn = nil
-	return nil
-}
 
-// MockSMTPClient implements a mock SMTP client for testing
-type MockSMTPClient struct {
-	capabilities  []string
-	authError     error
-	mailError     error
-	rcptError     error
-	dataError     error
-	quitError     error
-	startTLSError error
-}
-
-func (m *MockSMTPClient) Hello(localName string) error {
-	return nil
-}
-
-func (m *MockSMTPClient) EHLO(localName string) ([]string, error) {
-	return m.capabilities, nil
-}
-
-func (m *MockSMTPClient) StartTLS(config *tls.Config) error {
-	return m.startTLSError
-}
-
-func (m *MockSMTPClient) Auth(a smtp.Auth) error {
-	return m.authError
-}
-
-func (m *MockSMTPClient) Mail(from string) error {
-	return m.mailError
-}
-
-func (m *MockSMTPClient) Rcpt(to string) error {
-	return m.rcptError
-}
-
-// MockWriter implements a mock io.WriteCloser for testing
-type MockWriter struct{}
-
-func (m *MockWriter) Write(p []byte) (int, error) {
-	return len(p), nil
-}
-
-func (m *MockWriter) Close() error {
-	return nil
-}
-
-func (m *MockSMTPClient) Data() (io.WriteCloser, error) {
-	if m.dataError != nil {
-		return nil, m.dataError
+	if errClose != nil {
+		c.logger.Error("Error closing SMTP connection", "error", errClose)
+		if errQuit != nil {
+			return fmt.Errorf("quit failed (%v) and close failed: %w", errQuit, errClose)
+		}
+		return fmt.Errorf("failed to close connection: %w", errClose)
 	}
-	return &MockWriter{}, nil
-}
+	if errQuit != nil {
+		return fmt.Errorf("QUIT command failed: %w", errQuit)
+	}
 
-func (m *MockSMTPClient) Quit() error {
-	return m.quitError
-}
-
-func (m *MockSMTPClient) Close() error {
+	c.logger.Debug("SMTP client connection closed successfully")
 	return nil
 }
+
+// Host returns the target host for this client.
+func (c *SMTPClient) Host() string {
+	return c.host
+}
+
+// SMTPClientPool manages a pool of SMTP client connections.
+// It implements the SMTPClientPoolInterface.
+type SMTPClientPool struct {
+	config          SMTPClientConfig
+	dialer          Dialer
+	logger          LoggerInterface
+	mu              sync.RWMutex // Changed from sync.Mutex to sync.RWMutex to support RLock/RUnlock
+	pools           map[string]chan *SMTPClient
+	maxConnsPerHost int
+	idleTimeout     time.Duration
+}
+
+// NewSMTPClientPool creates a new pool.
+func NewSMTPClientPool(config SMTPClientConfig, dialer Dialer, logger LoggerInterface) *SMTPClientPool {
+	if dialer == nil {
+		dialer = &net.Dialer{Timeout: config.ConnectTimeout}
+		logger.Info("No dialer provided, using default net.Dialer", "timeout", config.ConnectTimeout)
+	}
+	if logger == nil {
+		logger = &NoOpLogger{}
+		logger.Warn("No logger provided for SMTPClientPool, using NoOpLogger")
+	}
+
+	poolLogger := logger.WithComponent("smtp_client_pool")
+
+	return &SMTPClientPool{
+		config:          config,
+		dialer:          dialer,
+		logger:          poolLogger,
+		pools:           make(map[string]chan *SMTPClient),
+		maxConnsPerHost: config.MaxConnections,
+		idleTimeout:     config.IdleTimeout,
+	}
+}
+
+// getOrCreateHostPool returns the channel (pool) for a given host, creating it if necessary.
+func (p *SMTPClientPool) getOrCreateHostPool(host string) chan *SMTPClient {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	poolChan, ok := p.pools[host]
+	if !ok {
+		size := p.maxConnsPerHost
+		if size <= 0 {
+			size = 1
+		}
+		p.logger.Info("Creating new connection pool for host", "host", host, "size", size)
+		poolChan = make(chan *SMTPClient, size)
+		p.pools[host] = poolChan
+	}
+	return poolChan
+}
+
+// GetClient retrieves or creates an SMTP client for the specified host.
+func (p *SMTPClientPool) GetClient(ctx context.Context, host string) (SMTPClientInterface, error) {
+	hostPool := p.getOrCreateHostPool(host)
+
+	select {
+	case client := <-hostPool:
+		if client == nil {
+			p.logger.Error("Received nil client from pool channel", "host", host)
+		} else {
+			p.logger.Debug("Reusing existing SMTP client from pool", "host", host)
+			if client.conn != nil {
+				client.conn.SetDeadline(time.Time{})
+			} else {
+				p.logger.Warn("Reused client has nil connection, discarding", "host", host)
+			}
+			return client, nil
+		}
+	default:
+		p.logger.Info("Pool empty, creating new SMTP client", "host", host)
+		client, err := newSMTPClient(ctx, host, p.config, p.dialer, p.logger)
+		if err != nil {
+			p.logger.Error("Failed to create new SMTP client", "host", host, "error", err)
+			return nil, err
+		}
+		return client, nil
+	}
+
+	p.logger.Info("Creating new SMTP client after issue with pooled client", "host", host)
+	client, err := newSMTPClient(ctx, host, p.config, p.dialer, p.logger)
+	if err != nil {
+		p.logger.Error("Failed to create new SMTP client", "host", host, "error", err)
+		return nil, err
+	}
+	return client, nil
+}
+
+// ReleaseClient returns a client to the pool.
+func (p *SMTPClientPool) ReleaseClient(client SMTPClientInterface) {
+	smtpClient, ok := client.(*SMTPClient)
+	if !ok || smtpClient == nil {
+		p.logger.Warn("Attempted to release an invalid client type or nil client")
+		if client != nil {
+			_ = client.Close()
+		}
+		return
+	}
+
+	host := smtpClient.Host()
+	hostPool := p.getOrCreateHostPool(host)
+
+	if smtpClient.conn != nil {
+		smtpClient.conn.SetDeadline(time.Time{})
+	} else {
+		p.logger.Warn("Attempted to release client with nil connection, discarding", "host", host)
+		return
+	}
+
+	select {
+	case hostPool <- smtpClient:
+		p.logger.Debug("Released SMTP client back to pool", "host", host)
+	default:
+		p.logger.Info("Pool full, closing released client instead of pooling", "host", host)
+		err := smtpClient.Close()
+		if err != nil {
+			p.logger.Warn("Error closing excess client", "host", host, "error", err)
+		}
+	}
+}
+
+// CloseAll closes all connections currently in the pool and removes the pools.
+func (p *SMTPClientPool) CloseAll() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.logger.Info("Closing all pooled SMTP client connections")
+	for host, poolChan := range p.pools {
+		close(poolChan)
+		for client := range poolChan {
+			if client != nil {
+				p.logger.Debug("Closing pooled client", "host", host)
+				err := client.Close()
+				if err != nil {
+					p.logger.Warn("Error closing pooled client during CloseAll", "host", host, "error", err)
+				}
+			}
+		}
+		delete(p.pools, host)
+	}
+	p.logger.Info("Finished closing all pooled connections")
+}
+
+// Helper function to ensure SMTPClient implements SMTPClientInterface
+var _ SMTPClientInterface = (*SMTPClient)(nil)
+
+// Helper function to ensure SMTPClientPool implements SMTPClientPoolInterface
+var _ SMTPClientPoolInterface = (*SMTPClientPool)(nil)

@@ -2,11 +2,11 @@ package ratelimit
 
 import (
 	"context"
-	"net"
 	"sync"
 	"time"
 
 	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/mailtive/smtpd/pkg/smtp"
 )
 
 // RateLimiter is a plugin that limits the number of emails a sender can send within a time window.
@@ -55,7 +55,7 @@ func (r *RateLimiter) cleanup(now time.Time) {
 }
 
 // OnMailFrom implements the Plugin interface.
-func (r *RateLimiter) OnMailFrom(ctx context.Context, from string, remoteAddr net.Addr) (bool, error) {
+func (r *RateLimiter) OnMailFrom(ctx context.Context, session *plugin.SessionInfo, from string) error {
 	now := time.Now()
 	r.cleanup(now)
 
@@ -68,19 +68,19 @@ func (r *RateLimiter) OnMailFrom(ctx context.Context, from string, remoteAddr ne
 			count:     1,
 			startTime: now,
 		}
-		return true, nil
+		return nil
 	}
 
 	if now.Sub(count.startTime) > r.window {
 		count.count = 1
 		count.startTime = now
-		return true, nil
+		return nil
 	}
 
 	if count.count >= r.limit {
-		return false, nil
+		return smtp.NewError(450, "4.7.1", "Rate limit exceeded")
 	}
 
 	count.count++
-	return true, nil
+	return nil
 }

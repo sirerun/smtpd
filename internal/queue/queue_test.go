@@ -4,20 +4,21 @@ import (
 	// "container/heap" // Unused in test file
 	"context"
 	"errors"
-	"log/slog"
-	"os"
+
 	// "sync"
 	"testing"
 	"time"
 
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/internal/message"
+
 	// "github.com/mailtive/smtpd/internal/metrics" // Unused in test file
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestQueueEnqueueDequeue(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	logger := logging.New(logging.DefaultConfig())
 	q := NewQueue(10, logger) // Pass buffer size and logger
 	defer q.Close()
 
@@ -36,7 +37,7 @@ func TestQueueEnqueueDequeue(t *testing.T) {
 }
 
 func TestQueueRequeueAndSchedule(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	logger := logging.New(logging.DefaultConfig())
 	q := NewQueue(10, logger)
 	defer q.Close()
 
@@ -70,7 +71,7 @@ func TestQueueRequeueAndSchedule(t *testing.T) {
 }
 
 func TestQueueClose(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	logger := logging.New(logging.DefaultConfig())
 	q := NewQueue(10, logger)
 
 	msg := message.NewMessage("sender@example.com", []string{"rcpt@test.net"}, []byte("Test Close"))

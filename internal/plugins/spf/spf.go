@@ -3,20 +3,20 @@ package spf
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 	"strings"
 
 	"github.com/mailtive/smtpd/internal/ctxkeys"
-	"github.com/mailtive/smtpd/internal/smtp"
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/mailtive/smtpd/pkg/smtp"
 )
 
 // SPFChecker implements the plugin.Plugin interface for SPF checks.
 type SPFChecker struct {
 	plugin.BasePlugin          // Embed base plugin for default methods
 	resolver          resolver // Use resolver interface
-	logger            *slog.Logger
+	logger            *logging.Logger
 }
 
 // resolver defines the interface for DNS lookups, allowing mocks.
@@ -32,13 +32,13 @@ func (dr *defaultResolver) LookupTXT(ctx context.Context, name string) ([]string
 }
 
 // NewSPFChecker creates a new SPFChecker plugin instance.
-func NewSPFChecker(logger *slog.Logger) *SPFChecker {
+func NewSPFChecker(logger *logging.Logger) *SPFChecker {
 	if logger == nil {
-		logger = slog.Default()
+		logger = logging.Default()
 	}
 	return &SPFChecker{
 		resolver: &defaultResolver{}, // Use default implementation
-		logger:   logger.With("plugin", "spf"),
+		logger:   logger.WithFields(map[string]interface{}{"plugin": "spf"}),
 	}
 }
 
@@ -75,7 +75,10 @@ type StoredSPFResult struct {
 // OnMailFrom is called after MAIL FROM command.
 // This is where the core SPF check logic will reside.
 func (p *SPFChecker) OnMailFrom(ctx context.Context, session *plugin.SessionInfo, from string) error {
-	logger := p.logger.With("session_id", session.SessionID, "remote_addr", session.RemoteAddr)
+	logger := p.logger.WithFields(map[string]interface{}{
+		"session_id":  session.SessionID,
+		"remote_addr": session.RemoteAddr,
+	})
 
 	clientIP := getClientIP(session)
 	if clientIP == nil {
@@ -85,7 +88,7 @@ func (p *SPFChecker) OnMailFrom(ctx context.Context, session *plugin.SessionInfo
 		return smtp.NewError(451, "4.3.0", "Temporary error: Could not determine client IP")
 	}
 
-	logger = logger.With("client_ip", clientIP.String())
+	logger = logger.WithFields(map[string]interface{}{"client_ip": clientIP.String()})
 
 	if from == "<>" {
 		logger.Info("Skipping SPF check for null sender")
@@ -102,7 +105,7 @@ func (p *SPFChecker) OnMailFrom(ctx context.Context, session *plugin.SessionInfo
 		return smtp.NewError(553, "5.1.7", "Sender address format invalid")
 	}
 	domain := parts[1]
-	logger = logger.With("spf_domain", domain)
+	logger = logger.WithFields(map[string]interface{}{"spf_domain": domain})
 	logger.Info("Initiating SPF check")
 
 	// Perform DNS TXT lookup for SPF record
@@ -122,16 +125,16 @@ func (p *SPFChecker) OnMailFrom(ctx context.Context, session *plugin.SessionInfo
 			} else if dnsErr.Temporary() {
 				logger.Warn("Temporary DNS error during SPF check", "error", err)
 				finalResult = TempError
-				returnErr = smtp.NewError(451, "4.3.0", "Temporary error: DNS issue during SPF check")
-			} else {
-				logger.Error("Permanent DNS error during SPF lookup", "error", err)
-				finalResult = PermError
 				returnErr = smtp.NewError(451, "4.3.0", "Temporary error: Cannot resolve SPF record")
+			} else {
+				logger.Error("Non-DNS error during SPF lookup", "error", err)
+				finalResult = TempError
+				returnErr = smtp.NewError(451, "4.3.0", "Temporary error: SPF record lookup issue")
 			}
 		} else {
-			logger.Error("Non-DNS error during SPF lookup", "error", err)
-			finalResult = TempError
-			returnErr = smtp.NewError(451, "4.3.0", "Temporary error: SPF record lookup issue")
+			logger.Error("Permanent DNS error during SPF lookup", "error", err)
+			finalResult = PermError
+			returnErr = smtp.NewError(451, "4.3.0", "Temporary error: Cannot resolve SPF record")
 		}
 	} else {
 		spfRecord := ""
@@ -228,7 +231,7 @@ func getClientIP(session *plugin.SessionInfo) net.IP {
 	}
 	// Use default logger or inject one if this needs logging
 	// log.Printf("SPF Check: Unsupported remote address type: %T", session.RemoteAddr)
-	slog.Default().Warn("Unsupported remote address type for SPF check", "type", fmt.Sprintf("%T", session.RemoteAddr)) // Requires fmt import
+	logging.Default().Warn("Unsupported remote address type for SPF check", "type", fmt.Sprintf("%T", session.RemoteAddr)) // Requires fmt import
 	return nil
 }
 
@@ -246,7 +249,7 @@ const (
 )
 
 // evaluateSPF parses and evaluates an SPF record string.
-func (p *SPFChecker) evaluateSPF(ctx context.Context, logger *slog.Logger, record string, clientIP net.IP, domain, heloDomain string) (SPFResult, error) {
+func (p *SPFChecker) evaluateSPF(ctx context.Context, logger *logging.Logger, record string, clientIP net.IP, domain, heloDomain string) (SPFResult, error) {
 	parts := strings.Fields(strings.TrimPrefix(strings.ToLower(record), "v=spf1 "))
 
 	for _, part := range parts {

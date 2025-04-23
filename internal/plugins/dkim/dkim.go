@@ -5,12 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io" // Added for io.Reader
-	"log/slog"
 
 	"github.com/emersion/go-msgauth/dkim"
 	"github.com/mailtive/smtpd/internal/ctxkeys"
-	"github.com/mailtive/smtpd/internal/smtp"
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/mailtive/smtpd/pkg/smtp"
 	// DKIM library will be added here
 )
 
@@ -20,7 +20,7 @@ type dkimVerifyFunc func(r io.Reader) ([]*dkim.Verification, error)
 // DKIMVerifier implements the plugin.Plugin interface for DKIM checks.
 type DKIMVerifier struct {
 	plugin.BasePlugin
-	logger   *slog.Logger
+	logger   *logging.Logger
 	verifyFn dkimVerifyFunc // Store the verification function
 	// Potential configuration: DNS resolver, required result (e.g., must pass vs. informational)
 	// resolver *net.Resolver // go-dkim uses its own resolver logic internally by default
@@ -28,15 +28,15 @@ type DKIMVerifier struct {
 
 // NewDKIMVerifier creates a new DKIMVerifier plugin instance.
 // It now accepts a verification function dependency.
-func NewDKIMVerifier(logger *slog.Logger, verifyFn dkimVerifyFunc) *DKIMVerifier {
+func NewDKIMVerifier(logger *logging.Logger, verifyFn dkimVerifyFunc) *DKIMVerifier {
 	if logger == nil {
-		logger = slog.Default()
+		logger = logging.Default()
 	}
 	if verifyFn == nil { // Default to the actual library function
 		verifyFn = dkim.Verify
 	}
 	return &DKIMVerifier{
-		logger:   logger.With("plugin", "dkim"),
+		logger:   logger.WithFields(map[string]interface{}{"plugin": "dkim"}),
 		verifyFn: verifyFn,
 		// resolver: net.DefaultResolver, // Not directly used by go-dkim Verify
 	}
@@ -49,7 +49,10 @@ func (p *DKIMVerifier) Name() string {
 
 // OnMessage is called after the message data is received.
 func (p *DKIMVerifier) OnMessage(ctx context.Context, session *plugin.SessionInfo, msg *plugin.MessageInfo) error {
-	logger := p.logger.With("session_id", session.SessionID, "remote_addr", session.RemoteAddr)
+	logger := p.logger.WithFields(map[string]interface{}{
+		"session_id":  session.SessionID,
+		"remote_addr": session.RemoteAddr,
+	})
 	logger.Info("Performing DKIM verification")
 
 	// Use the stored verification function

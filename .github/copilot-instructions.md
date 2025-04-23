@@ -1,0 +1,11 @@
+- Give each type a single, well-defined responsibility (Single Responsibility).
+- Extend behavior by adding new types or methods rather than modifying existing code (Open-Closed).
+- Ensure that substitutable types preserve intended behavior (Liskov Substitution).
+- Break larger interfaces into smaller, specialized ones (Interface Segregation).
+- Depend on abstractions, not concrete implementations (Dependency Inversion).
+- Prefer composition over inheritance to keep code simple and flexible.
+- Share memory by communicating (use goroutines and channels) rather than communicating by sharing memory.
+- Return errors explicitly and handle them consistently, avoiding exceptions.
+- Keep packages small and focused; each should have a single, clear purpose.
+- Document your code to clarify intent, especially for exported types and functions.
+- Use internal/logging for logs

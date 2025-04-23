@@ -4,21 +4,20 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mailtive/smtpd/internal/auth"
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/internal/queue"
 	"github.com/mailtive/smtpd/pkg/plugin"
 	"github.com/stretchr/testify/require"
 )
 
 // Shared test variables
-var testSessionLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With("test_component", "session")
+var testSessionLogger = logging.New(logging.DefaultConfig()).WithComponent("session")
 var testUserStore = auth.NewStore()
 var testQueue = queue.NewQueue(10, testSessionLogger)
 

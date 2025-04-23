@@ -2,14 +2,13 @@ package spf
 
 import (
 	"context"
-	"log/slog"
 	"net"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/mailtive/smtpd/internal/smtp"
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/mailtive/smtpd/pkg/smtp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +31,7 @@ func (r *mockResolver) LookupTXT(ctx context.Context, domain string) ([]string, 
 	return nil, &net.DNSError{Err: "no such host", Name: domain, IsNotFound: true}
 }
 
-var testLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+var testLogger = logging.New(logging.DefaultConfig())
 
 func TestSPFChecker_OnMailFrom(t *testing.T) {
 	tests := []struct {
@@ -107,10 +106,10 @@ func TestSPFChecker_OnMailFrom(t *testing.T) {
 			// Check for expected error
 			if tt.expectedError {
 				assert.Error(t, err)
-				smtpErr, ok := err.(*smtp.Error)
-				assert.True(t, ok, "Error should be of type *smtp.Error")
+				smtpErr, ok := err.(smtp.Error)
+				assert.True(t, ok, "Error should implement smtp.Error interface")
 				if tt.expectedResult == Fail {
-					assert.Equal(t, 550, smtpErr.Code, "Should be a 550 error for SPF Fail")
+					assert.Equal(t, 550, smtpErr.Code(), "Should be a 550 error for SPF Fail")
 				}
 			} else {
 				assert.NoError(t, err)

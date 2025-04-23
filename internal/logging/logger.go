@@ -132,7 +132,7 @@ func New(config *Config) *Logger {
 	// Add service and environment to all logs
 	attrs := []slog.Attr{
 		slog.String("service", config.ServiceName),
-		slog.String("env", config.Environment),
+		slog.String("environment", config.Environment),
 	}
 
 	// Create logger with base attributes
@@ -308,4 +308,9 @@ func NewSlogAdapter(logger *Logger) *log.Logger {
 	// The component attribute helps identify the source.
 	l := logger.WithComponent("stdlib")
 	return slog.NewLogLogger(l.Handler(), slog.LevelInfo)
+}
+
+// ToSlog returns the underlying *slog.Logger
+func (l *Logger) ToSlog() *slog.Logger {
+	return l.Logger
 }

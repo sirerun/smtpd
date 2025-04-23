@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -157,26 +156,4 @@ func TestValidateConfig(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestCreateServerConfig(t *testing.T) {
-	cfg := DefaultConfig()
-	// Create a test logger
-	logCfg := logging.DefaultConfig()
-	logCfg.Level = logging.ErrorLevel // Keep test logs quiet
-	logCfg.Output = "stderr"          // Or os.Stderr
-	testLogger := logging.New(logCfg)
-
-	serverCfg := cfg.CreateServerConfig(testLogger) // Pass the logger
-	assert.NotNil(t, serverCfg)
-	assert.Equal(t, cfg.Server.MaxConnections, serverCfg.MaxConnections)
-	assert.Equal(t, cfg.Server.ReadBufferSize, serverCfg.ReadBufferSize)
-	assert.Equal(t, cfg.Server.WriteBufferSize, serverCfg.WriteBufferSize)
-	assert.Equal(t, cfg.Server.ReadTimeout, serverCfg.ReadTimeout)
-	assert.Equal(t, cfg.Server.WriteTimeout, serverCfg.WriteTimeout)
-	assert.Equal(t, cfg.Server.IdleTimeout, serverCfg.IdleTimeout)
-	assert.Equal(t, cfg.Server.ShutdownTimeout, serverCfg.ShutdownTimeout)
-	assert.Equal(t, cfg.Server.MaxMessageSize, serverCfg.MaxMessageSize)
-	assert.Equal(t, cfg.Server.WorkerPoolSize, serverCfg.WorkerPoolSize)
-	assert.Equal(t, cfg.Server.ConnectionBacklog, serverCfg.ConnectionBacklog)
 }

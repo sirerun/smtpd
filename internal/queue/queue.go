@@ -3,14 +3,17 @@ package queue
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"sync"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/errors"
 	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/internal/message"
 	"github.com/mailtive/smtpd/internal/metrics"
 )
+
+// ErrQueueClosed is returned when attempting to perform operations on a closed queue.
+var ErrQueueClosed = errors.New("queue is closed")
 
 // --- Retry Heap Implementation ---
 
@@ -105,7 +108,7 @@ func (q *Queue) Enqueue(msg *message.Message) error {
 	if q.closed {
 		q.mu.Unlock()
 		q.logger.Warn("Attempted to enqueue to closed queue", "msg_id", msg.ID)
-		return errors.NewControlledStop(context.Canceled)
+		return ErrQueueClosed
 	}
 	if msg.NextAttemptAt.IsZero() {
 		msg.NextAttemptAt = time.Now()
@@ -119,7 +122,7 @@ func (q *Queue) Enqueue(msg *message.Message) error {
 		return nil
 	case <-q.stopChan:
 		q.logger.Warn("Enqueue failed, queue is stopping", "msg_id", msg.ID)
-		return errors.NewControlledStop(context.Canceled)
+		return ErrQueueClosed
 	}
 }
 
@@ -130,7 +133,7 @@ func (q *Queue) Requeue(msg *message.Message) error {
 
 	if q.closed {
 		q.logger.Warn("Attempted to requeue to closed queue", "msg_id", msg.ID)
-		return errors.NewControlledStop(context.Canceled)
+		return ErrQueueClosed
 	}
 
 	if msg.NextAttemptAt.IsZero() || msg.NextAttemptAt.Before(time.Now()) {
@@ -154,14 +157,14 @@ func (q *Queue) Dequeue(ctx context.Context) (*message.Message, error) {
 	select {
 	case msg, ok := <-q.readyChan:
 		if !ok {
-			return nil, errors.NewControlledStop(context.Canceled)
+			return nil, ErrQueueClosed
 		}
 		metrics.QueueSizeReady.Dec()
 		return msg, nil
 	case <-ctx.Done():
-		return nil, errors.NewControlledStop(ctx.Err())
+		return nil, ctx.Err()
 	case <-q.stopChan:
-		return nil, errors.NewControlledStop(context.Canceled)
+		return nil, ErrQueueClosed
 	}
 }
 

@@ -3,15 +3,13 @@ package processor
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/errors"
 	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/internal/message"
 	"github.com/mailtive/smtpd/internal/metrics"
-	"github.com/mailtive/smtpd/internal/outbound"
-	"github.com/mailtive/smtpd/internal/queue"
 )
 
 // Define retry parameters
@@ -30,13 +28,13 @@ type Queuer interface {
 
 // Deliverer represents the interface for message delivery operations.
 type Deliverer interface {
-	Deliver(*message.Message) map[string]outbound.DomainDeliveryStatus
+	Deliver(ctx context.Context, msg *message.Message) error
 }
 
 // QueueProcessor handles message processing from the queue.
 type QueueProcessor struct {
-	queue     *queue.Queue
-	deliverer *outbound.Deliverer
+	queue     Queuer
+	deliverer Deliverer
 	workers   []*worker
 	stopChan  chan struct{}
 	stopWg    sync.WaitGroup
@@ -47,17 +45,17 @@ type QueueProcessor struct {
 // NewQueueProcessor creates a new queue processor.
 // numWorkers specifies how many concurrent delivery goroutines to run.
 func NewQueueProcessor(
-	q *queue.Queue,
-	d *outbound.Deliverer,
+	q Queuer,
+	d Deliverer,
 	numWorkers int,
 	logger *logging.Logger,
-	metrics *metrics.Metrics,
+	m *metrics.Metrics,
 ) *QueueProcessor {
 	if logger == nil {
 		logger = logging.New(logging.DefaultConfig())
 	}
-	if metrics == nil {
-		metrics = &metrics.Metrics{Logger: logger.With("plugin", "metrics")}
+	if m == nil {
+		m = metrics.NewMetrics()
 	}
 	p := &QueueProcessor{
 		queue:     q,
@@ -65,7 +63,7 @@ func NewQueueProcessor(
 		workers:   make([]*worker, numWorkers),
 		stopChan:  make(chan struct{}),
 		logger:    logger,
-		metrics:   metrics,
+		metrics:   m,
 	}
 	for i := 0; i < numWorkers; i++ {
 		p.workers[i] = newWorker(i, p)
@@ -119,89 +117,128 @@ func newWorker(id int, p *QueueProcessor) *worker {
 // process is the main processing loop for a single worker goroutine.
 func (w *worker) process(ctx context.Context) {
 	defer w.processor.stopWg.Done()
-	w.logger.Info("Worker started")
+	w.logger.Info("Worker started", "worker_id", w.id)
+
 	for {
-		// Blocking Dequeue - waits for a message or context cancellation
-		msg, err := w.processor.queue.Dequeue(ctx)
-		if err != nil {
-			if errors.IsControlledStop(err) {
-				w.logger.Info("Worker exiting gracefully", "reason", err)
-				return // Exit loop gracefully
-			}
-			// Log other unexpected errors
-			w.logger.Error("Worker received error during Dequeue, exiting", "error", err)
-			return
-		}
-		if msg == nil {
-			// Should not happen if error is nil, but check defensively
-			continue
-		}
-
-		msgLogger := w.logger.With("msg_id", msg.ID, "mail_from", msg.From)
-
-		// Check if it's time to attempt delivery
-		if time.Now().Before(msg.NextAttemptAt) {
-			if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
-				msgLogger.Error("CRITICAL - Failed to requeue sleepy message", "error", requeueErr)
-			}
-			continue // Get another message
-		}
-
-		msgLogger.Info("Processing message", "attempt", msg.RetryCount+1)
-		err = w.processor.deliverer.Deliver(ctx, msg)
-
-		// Initialize variables for retry/bounce logic
-		needsRetry := false
-		needsBounce := false
-		failedDomains := []string{}
-		tempFailDomains := []string{}
-
-		if err != nil {
-			msgLogger.Error("Delivery failed", "error", err)
-			w.processor.metrics.RecordMessageStatusByDomain("delivery_failed", msg.From)
-			needsRetry = true
-			tempFailDomains = append(tempFailDomains, msg.From)
-		} else {
-			msgLogger.Info("Delivery successful")
-			w.processor.metrics.RecordMessageStatusByDomain("delivered", msg.From)
-		}
-
-		if needsRetry {
-			msg.RetryCount++
-			if msg.RetryCount > MaxRetries {
-				msgLogger.Warn("Message exceeded max retries, marking for bounce", "max_retries", MaxRetries, "failed_domains", tempFailDomains)
-				needsBounce = true
-				failedDomains = append(failedDomains, tempFailDomains...) // Add temp fail domains to bounce list
-			} else {
-				delay := calculateRetryDelay(msg.RetryCount)
-				msg.NextAttemptAt = time.Now().Add(delay)
-				msgLogger.Info("Message needs retry, requeueing", "attempt", msg.RetryCount, "delay", delay.String(), "next_attempt_at", msg.NextAttemptAt, "failed_domains", tempFailDomains)
-				if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
-					msgLogger.Error("CRITICAL - Failed to requeue message for retry", "error", requeueErr)
-				}
-				continue // Message was requeued, don't process bounce for this round
-			}
-		}
-
-		if needsBounce {
-			msgLogger.Warn("Message needs bounce", "failed_domains", failedDomains)
-			// TODO: Implement bounce generation (NDR).
-		}
-
-		// If message was neither requeued nor bounced, it's considered fully processed (successfully or permanently failed)
-		if !needsRetry && !needsBounce {
-			msgLogger.Info("Message processed successfully")
-		}
-
-		// Check context after processing a message to allow faster shutdown
 		select {
 		case <-ctx.Done():
-			w.logger.Info("Worker exiting due to context cancellation after processing message")
+			w.logger.Info("Worker exiting due to context cancellation", "worker_id", w.id)
 			return
 		default:
-			// Continue loop
+			// Continue to dequeue with a timeout context to ensure we can respond quickly to cancellation
+			dequeueCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+			msg, err := w.processor.queue.Dequeue(dequeueCtx)
+			cancel()
+
+			// Handle context cancellation from parent
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if ctx.Err() != nil {
+					// Parent context is done, exit completely
+					w.logger.Info("Worker detected parent context cancellation during dequeue", "worker_id", w.id)
+					return
+				}
+				// Only the local timeout expired, continue loop to check parent context again
+				continue
+			}
+
+			if err != nil {
+				// Log other unexpected errors
+				w.logger.Error("Worker received error during Dequeue", "worker_id", w.id, "error", err)
+				// Sleep briefly to avoid hammering the queue in case of persistent errors
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			if msg == nil {
+				// Should not happen if error is nil, but check defensively
+				continue
+			}
+
+			msgLogger := w.logger.With("msg_id", msg.ID, "mail_from", msg.From, "worker_id", w.id)
+
+			// Check if it's time to attempt delivery
+			if time.Now().Before(msg.NextAttemptAt) {
+				if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
+					msgLogger.Error("CRITICAL - Failed to requeue sleepy message", "error", requeueErr)
+				}
+				continue // Get another message
+			}
+
+			msgLogger.Info("Processing message", "attempt", msg.RetryCount+1)
+
+			// Use a separate context with timeout for delivery to ensure we don't block shutdown
+			deliveryCtx, deliveryCancel := context.WithTimeout(ctx, 2*time.Minute)
+			err = w.processor.deliverer.Deliver(deliveryCtx, msg)
+			deliveryCancel()
+
+			if err != nil {
+				// Check for context cancellation during delivery
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					if ctx.Err() != nil {
+						// Parent context is done, requeue and exit
+						msgLogger.Info("Worker detected context cancellation during delivery, requeueing message")
+						if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
+							msgLogger.Error("CRITICAL - Failed to requeue message during shutdown", "error", requeueErr)
+						}
+						return
+					}
+					// Only the delivery timeout expired, treat as temporary failure and requeue
+					msgLogger.Warn("Delivery timed out, will retry", "timeout", "2m")
+					msg.RetryCount++
+					delay := calculateRetryDelay(msg.RetryCount)
+					msg.NextAttemptAt = time.Now().Add(delay)
+					if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
+						msgLogger.Error("CRITICAL - Failed to requeue message after timeout", "error", requeueErr)
+					}
+					continue
+				}
+
+				msgLogger.Error("Delivery failed", "error", err)
+				metrics.RecordMessageStatusByDomain("delivery_failed", msg.From)
+
+				// Determine if this is a permanent failure or temporary failure
+				// For now, check if the error message contains "permanent"
+				isPermanentFailure := err != nil && isPermFailure(err.Error())
+
+				if isPermanentFailure {
+					msgLogger.Warn("Permanent delivery failure, not requeueing", "error", err)
+					// Here we would normally generate a bounce message
+					// TODO: Implement bounce message generation
+				} else if msg.RetryCount >= MaxRetries {
+					msgLogger.Warn("Message exceeded max retries, marking for bounce", "max_retries", MaxRetries)
+					// Here we would normally generate a bounce message
+					// TODO: Implement bounce message generation
+				} else {
+					msg.RetryCount++
+					delay := calculateRetryDelay(msg.RetryCount)
+					msg.NextAttemptAt = time.Now().Add(delay)
+					msgLogger.Info("Message needs retry, requeueing", "attempt", msg.RetryCount, "delay", delay.String(), "next_attempt_at", msg.NextAttemptAt)
+					if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
+						msgLogger.Error("CRITICAL - Failed to requeue message for retry", "error", requeueErr)
+					}
+				}
+			} else {
+				msgLogger.Info("Message processed successfully")
+				metrics.RecordMessageStatusByDomain("delivered", msg.From)
+			}
+
+			// Check for shutdown after each message
+			select {
+			case <-ctx.Done():
+				msgLogger.Info("Worker exiting due to context cancellation after processing message")
+				return
+			default:
+				// Continue processing
+			}
 		}
 	}
+}
+
+// isPermFailure determines if an error is a permanent failure.
+// In a real implementation, this would check for SMTP 5xx error codes
+// and other indicators of permanent failures.
+func isPermFailure(errMsg string) bool {
+	return strings.Contains(strings.ToLower(errMsg), "permanent")
 }
 
 // calculateRetryDelay calculates the delay for the next retry attempt.

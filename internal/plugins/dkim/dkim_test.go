@@ -6,13 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/emersion/go-msgauth/dkim"
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/internal/message"
 	"github.com/mailtive/smtpd/pkg/plugin"
 	"github.com/stretchr/testify/assert"
@@ -116,7 +115,7 @@ func mockVerify(r io.Reader) ([]*dkim.Verification, error) {
 // var originalDkimVerifyFunc = dkim.Verify // No longer needed with DI
 
 // Need a shared logger for tests
-var testLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+var testLogger = logging.New(logging.DefaultConfig())
 
 var (
 	ErrSignatureNotValid = errors.New("signature not valid")

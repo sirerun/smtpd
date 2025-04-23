@@ -4,33 +4,38 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/mail"
 	"strings"
 
 	"github.com/emersion/go-dkim"
 	"github.com/mailtive/smtpd/internal/ctxkeys"
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/internal/plugins/spf"
-	"github.com/mailtive/smtpd/internal/smtp"
 	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/mailtive/smtpd/pkg/smtp"
 )
+
+// resolver defines the interface for DNS lookups, allowing mocks.
+type resolver interface {
+	LookupTXT(ctx context.Context, name string) ([]string, error)
+}
 
 // DMARCChecker implements the plugin.Plugin interface for DMARC checks.
 type DMARCChecker struct {
 	plugin.BasePlugin
-	resolver *net.Resolver
-	logger   *slog.Logger
+	resolver resolver
+	logger   *logging.Logger
 }
 
 // NewDMARCChecker creates a new DMARCChecker plugin instance.
-func NewDMARCChecker(logger *slog.Logger) *DMARCChecker {
+func NewDMARCChecker(logger *logging.Logger) *DMARCChecker {
 	if logger == nil {
-		logger = slog.Default()
+		logger = logging.Default()
 	}
 	return &DMARCChecker{
 		resolver: net.DefaultResolver,
-		logger:   logger.With("plugin", "dmarc"),
+		logger:   logger.WithFields(map[string]interface{}{"plugin": "dmarc"}),
 	}
 }
 
@@ -51,7 +56,11 @@ type dmarcRecord struct {
 
 // OnMessage is called after the full message data is received.
 func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInfo, msg *plugin.MessageInfo) error {
-	logger := p.logger.With("session_id", session.SessionID, "remote_addr", session.RemoteAddr, "mail_from", msg.From)
+	logger := p.logger.WithFields(map[string]interface{}{
+		"session_id":  session.SessionID,
+		"remote_addr": session.RemoteAddr,
+		"mail_from":   msg.From,
+	})
 	logger.Info("Starting DMARC check")
 
 	// 1. Get From Header Domain
@@ -69,7 +78,7 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 		logger.Info("No domain found in From header address", "address", fromHeaderAddr.Address)
 		return nil // Cannot perform DMARC check
 	}
-	logger = logger.With("dmarc_domain", fromDomain)
+	logger = logger.WithFields(map[string]interface{}{"dmarc_domain": fromDomain})
 
 	// 2. Get SPF Result from Context
 	spfValue := ctx.Value(ctxkeys.SPFResultKey)
@@ -110,7 +119,11 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 		return nil // No valid DMARC record found
 	}
 
-	logger = logger.With("dmarc_policy", dmarcPolicy.Policy, "aspf", dmarcPolicy.SPFAlignment, "adkim", dmarcPolicy.DKIMAlignment)
+	logger = logger.WithFields(map[string]interface{}{
+		"dmarc_policy": dmarcPolicy.Policy,
+		"aspf":         dmarcPolicy.SPFAlignment,
+		"adkim":        dmarcPolicy.DKIMAlignment,
+	})
 	logger.Info("Found DMARC policy")
 
 	// 5. Check Alignment and Evaluate Policy
@@ -145,7 +158,7 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 }
 
 // lookupDMARC finds and parses the DMARC record for a domain.
-func (p *DMARCChecker) lookupDMARC(ctx context.Context, logger *slog.Logger, domain string) (*dmarcRecord, error) {
+func (p *DMARCChecker) lookupDMARC(ctx context.Context, logger *logging.Logger, domain string) (*dmarcRecord, error) {
 	lookupDomain := "_dmarc." + domain
 	logger.Debug("Looking up DMARC record", "lookup_domain", lookupDomain)
 	txtRecords, err := p.resolver.LookupTXT(ctx, lookupDomain)

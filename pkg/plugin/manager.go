@@ -26,6 +26,17 @@ func (m *Manager) Register(p Plugin) {
 	m.plugins = append(m.plugins, p)
 }
 
+// Plugins returns a copy of the current plugins list.
+// This provides thread-safe read-only access to the plugins.
+func (m *Manager) Plugins() []Plugin {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	// Return a copy to prevent external modification
+	result := make([]Plugin, len(m.plugins))
+	copy(result, m.plugins)
+	return result
+}
+
 // ExecuteOnMailFrom executes the OnMailFrom hook for all registered plugins.
 // It stops and returns the first error encountered.
 func (m *Manager) ExecuteOnMailFrom(ctx context.Context, session *SessionInfo, from string) error {
