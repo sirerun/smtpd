@@ -23,7 +23,7 @@ func TestQueueEnqueueDequeue(t *testing.T) {
 	defer q.Close()
 
 	msg := message.NewMessage("sender@example.com", []string{"recipient@example.com"}, []byte("Test message")) // Use []byte
-	err := q.Enqueue(msg)
+	err := q.Enqueue(context.Background(),msg)
 	require.NoError(t, err)
 
 	// Use context for Dequeue
@@ -46,12 +46,12 @@ func TestQueueRequeueAndSchedule(t *testing.T) {
 	msg1 := message.NewMessage("retry@example.com", []string{"rcpt@test.net"}, []byte("Retry me"))
 	msg1.NextAttemptAt = retryTime
 	msg1.RetryCount = 1
-	err := q.Requeue(msg1)
+	err := q.Requeue(context.Background(),msg1)
 	require.NoError(t, err)
 
 	// Message for immediate attempt (should be dequeued first)
 	msg2 := message.NewMessage("now@example.com", []string{"rcpt@test.net"}, []byte("Process now"))
-	err = q.Enqueue(msg2)
+	err = q.Enqueue(context.Background(),msg2)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -75,13 +75,13 @@ func TestQueueClose(t *testing.T) {
 	q := NewQueue(10, logger)
 
 	msg := message.NewMessage("sender@example.com", []string{"rcpt@test.net"}, []byte("Test Close"))
-	err := q.Enqueue(msg)
+	err := q.Enqueue(context.Background(),msg)
 	require.NoError(t, err)
 
 	q.Close()
 
 	// Further enqueues should fail
-	err = q.Enqueue(msg)
+	err = q.Enqueue(context.Background(),msg)
 	assert.Error(t, err, "Enqueue after Close should return an error")
 
 	// Verify the error is specifically ErrQueueClosed

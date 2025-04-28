@@ -561,7 +561,7 @@ func (s *Session) handleData() error {
 		Data:      data,
 		CreatedAt: time.Now(),
 	}
-	if err := s.queue.Enqueue(msg); err != nil {
+	if err := s.queue.Enqueue(s.ctx, msg); err != nil {
 		s.logger.Error("Failed to enqueue message", "msg_id", msg.ID, "error", err)
 		return s.writeResponse(451, "Internal server error: Failed to queue message")
 	}

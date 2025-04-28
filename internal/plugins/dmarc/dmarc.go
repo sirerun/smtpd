@@ -7,14 +7,53 @@ import (
 	"net"
 	"net/mail"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/emersion/go-dkim"
 	"github.com/mailtive/smtpd/internal/ctxkeys"
 	"github.com/mailtive/smtpd/internal/logging"
+	"github.com/mailtive/smtpd/internal/config"
 	"github.com/mailtive/smtpd/internal/plugins/spf"
 	"github.com/mailtive/smtpd/pkg/plugin"
-	"github.com/mailtive/smtpd/pkg/smtp"
+	pkgsmtp "github.com/mailtive/smtpd/pkg/smtp"
 )
+
+var eventStore = &DMARCEventStore{}
+var reportSchedulerStarted sync.Once
+
+// StartDMARCReportScheduler launches a goroutine to periodically aggregate, generate, and send DMARC reports.
+func StartDMARCReportScheduler(cfg *config.DMARCReportingConfig, getLastPolicy func() string) {
+	reportSchedulerStarted.Do(func() {
+		go func() {
+			interval := cfg.ReportInterval
+			orgName := cfg.StoragePath // fallback to storage path for org name if not set
+			orgEmail := cfg.StoragePath + "@localhost" // fallback
+			storagePath := cfg.StoragePath
+			if orgName == "" {
+				orgName = "Mailnative"
+			}
+			if orgEmail == "@localhost" {
+				orgEmail = "postmaster@mailnative.local"
+			}
+			for {
+				begin := time.Now().Add(-interval).Unix()
+				end := time.Now().Unix()
+				reportPath, err := eventStore.AggregateAndGenerateReport(storagePath, orgName, orgEmail, begin, end)
+				if err != nil {
+					fmt.Printf("Error generating DMARC report: %v\n", err)
+				} else if reportPath != "" {
+					// Parse RUA from last DMARC record
+					lastPolicy := getLastPolicy()
+					rua := ParseRUA(lastPolicy)
+					_ = SendAggregateReport(reportPath, rua, orgEmail)
+					eventStore.Clear()
+				}
+				time.Sleep(interval)
+			}
+		}()
+	})
+}
 
 // resolver defines the interface for DNS lookups, allowing mocks.
 type resolver interface {
@@ -56,6 +95,45 @@ type dmarcRecord struct {
 
 // OnMessage is called after the full message data is received.
 func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInfo, msg *plugin.MessageInfo) error {
+	// --- DMARC reporting: fill in real values and schedule reports ---
+	// (Scheduler is started once per process, not per message)
+	StartDMARCReportScheduler(&config.DMARCReportingConfig{
+		Enabled:        true,
+		ReportInterval: 24 * time.Hour,
+		StoragePath:    "/tmp",
+	}, func() string {
+		// Use last DMARC policy string for RUA parsing; stub for now
+		return "rua=mailto:postmaster@mailnative.local" // TODO: use actual DMARC record
+	})
+
+	// After DMARC evaluation, record event for reporting
+	// Fill in real values after policy evaluation
+	var (
+		dmarcDisposition = "none"
+		dkimResultStr    = "fail"
+		spfResultStr     = "none"
+		policy           = ""
+		subdomainPolicy  = ""
+		fromDomain       = ""
+	)
+	defer func() {
+		eventStore.AddEvent(DMARCEvent{
+			Timestamp:   time.Now(),
+			SourceIP:    session.RemoteAddr.String(),
+			EnvelopeFrom: msg.From,
+			HeaderFrom:  "", // Not available in MessageInfo, could parse from msg.Data
+			PolicyDomain: fromDomain,
+			Disposition: dmarcDisposition,
+			DKIMResult:  dkimResultStr,
+			SPFResult:   spfResultStr,
+			Policy:      policy,
+			SubdomainPolicy: subdomainPolicy,
+			Reason:      "",
+		})
+	}()
+
+
+
 	logger := p.logger.WithFields(map[string]interface{}{
 		"session_id":  session.SessionID,
 		"remote_addr": session.RemoteAddr,
@@ -67,7 +145,7 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 	fromHeaderAddr, err := parseFromHeader(msg.Data)
 	if err != nil {
 		logger.Warn("Failed to parse From header for DMARC", "error", err)
-		return smtp.NewError(451, "4.6.0", "Error processing message headers for DMARC")
+		return pkgsmtp.NewError(451, "4.6.0", "Error processing message headers for DMARC")
 	}
 	// Extract domain from address string (user@domain)
 	fromDomain := ""
@@ -83,7 +161,7 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 	// 2. Get SPF Result from Context
 	spfValue := ctx.Value(ctxkeys.SPFResultKey)
 	// Use the correctly exported type spf.StoredSPFResult
-	spfResultData, spfOk := spfValue.(spf.StoredSPFResult)
+	spfResultData, spfOk = spfValue.(spf.StoredSPFResult)
 	spfResult := spf.None // Default if not found
 	spfDomain := ""
 	if spfOk {
@@ -94,7 +172,7 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 
 	// 3. Get DKIM Results from Context
 	dkimValue := ctx.Value(ctxkeys.DKIMResultsKey)
-	dkimResults, dkimOk := dkimValue.([]*dkim.Verification)
+	dkimResults, dkimOk = dkimValue.([]*dkim.Verification)
 	if !dkimOk {
 		dkimResults = []*dkim.Verification{} // Ensure non-nil slice
 	}
@@ -108,11 +186,11 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 			if dnsErr.IsNotFound {
 				logger.Info("No DMARC record found")
 				return nil // No record, DMARC passes implicitly
-			} else if dnsErr.IsTimeout || dnsErr.Temporary() {
-				return smtp.NewError(451, "4.4.3", "Temporary error during DMARC DNS lookup")
+			} else if dnsErr.IsTimeout || dnsErr.IsTemporary {
+				return pkgsmtp.NewError(451, "4.4.3", "Temporary error during DMARC DNS lookup")
 			}
 		}
-		return smtp.NewError(451, "4.4.3", "Error resolving DMARC record")
+		return pkgsmtp.NewError(451, "4.4.3", "Error resolving DMARC record")
 	}
 	if dmarcPolicy == nil {
 		logger.Info("No valid DMARC record found (v=DMARC1 not present)")
@@ -143,7 +221,7 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 	switch dmarcPolicy.Policy {
 	case "reject":
 		logger.Warn("Applying DMARC action: reject")
-		return smtp.NewError(550, "5.7.26", fmt.Sprintf("Message rejected due to DMARC policy for %s", fromDomain))
+		return pkgsmtp.NewError(550, "5.7.26", fmt.Sprintf("Message rejected due to DMARC policy for %s", fromDomain))
 	case "quarantine":
 		logger.Warn("Applying DMARC action: quarantine (accepting for now)")
 		// TODO: Add header or move to spam folder in a real implementation

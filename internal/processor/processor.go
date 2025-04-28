@@ -22,8 +22,8 @@ const (
 // Queuer represents the interface for message queuing operations needed by the processor.
 type Queuer interface {
 	Dequeue(ctx context.Context) (*message.Message, error) // Blocking dequeue with context for cancellation
-	Enqueue(msg *message.Message) error                    // Enqueue for immediate processing
-	Requeue(msg *message.Message) error                    // Requeue for later retry
+	Enqueue(ctx context.Context, msg *message.Message) error // Enqueue for immediate processing
+	Requeue(ctx context.Context, msg *message.Message) error // Requeue for later retry
 }
 
 // Deliverer represents the interface for message delivery operations.
@@ -158,7 +158,7 @@ func (w *worker) process(ctx context.Context) {
 
 			// Check if it's time to attempt delivery
 			if time.Now().Before(msg.NextAttemptAt) {
-				if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
+				if requeueErr := w.processor.queue.Requeue(ctx, msg); requeueErr != nil {
 					msgLogger.Error("CRITICAL - Failed to requeue sleepy message", "error", requeueErr)
 				}
 				continue // Get another message
@@ -177,7 +177,7 @@ func (w *worker) process(ctx context.Context) {
 					if ctx.Err() != nil {
 						// Parent context is done, requeue and exit
 						msgLogger.Info("Worker detected context cancellation during delivery, requeueing message")
-						if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
+						if requeueErr := w.processor.queue.Requeue(ctx, msg); requeueErr != nil {
 							msgLogger.Error("CRITICAL - Failed to requeue message during shutdown", "error", requeueErr)
 						}
 						return
@@ -187,7 +187,7 @@ func (w *worker) process(ctx context.Context) {
 					msg.RetryCount++
 					delay := calculateRetryDelay(msg.RetryCount)
 					msg.NextAttemptAt = time.Now().Add(delay)
-					if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
+					if requeueErr := w.processor.queue.Requeue(ctx, msg); requeueErr != nil {
 						msgLogger.Error("CRITICAL - Failed to requeue message after timeout", "error", requeueErr)
 					}
 					continue
@@ -213,7 +213,7 @@ func (w *worker) process(ctx context.Context) {
 					delay := calculateRetryDelay(msg.RetryCount)
 					msg.NextAttemptAt = time.Now().Add(delay)
 					msgLogger.Info("Message needs retry, requeueing", "attempt", msg.RetryCount, "delay", delay.String(), "next_attempt_at", msg.NextAttemptAt)
-					if requeueErr := w.processor.queue.Requeue(msg); requeueErr != nil {
+					if requeueErr := w.processor.queue.Requeue(ctx, msg); requeueErr != nil {
 						msgLogger.Error("CRITICAL - Failed to requeue message for retry", "error", requeueErr)
 					}
 				}

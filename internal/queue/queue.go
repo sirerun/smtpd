@@ -103,7 +103,7 @@ func NewQueue(bufferSize int, logger *logging.Logger) *Queue {
 }
 
 // Enqueue adds a message for immediate processing.
-func (q *Queue) Enqueue(msg *message.Message) error {
+func (q *Queue) Enqueue(ctx context.Context, msg *message.Message) error {
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
@@ -120,6 +120,9 @@ func (q *Queue) Enqueue(msg *message.Message) error {
 	case q.readyChan <- msg:
 		metrics.QueueSizeReady.Inc()
 		return nil
+	case <-ctx.Done():
+		q.logger.Warn("Enqueue cancelled by context", "msg_id", msg.ID)
+		return ctx.Err()
 	case <-q.stopChan:
 		q.logger.Warn("Enqueue failed, queue is stopping", "msg_id", msg.ID)
 		return ErrQueueClosed
@@ -127,7 +130,7 @@ func (q *Queue) Enqueue(msg *message.Message) error {
 }
 
 // Requeue adds a message back for a later retry attempt.
-func (q *Queue) Requeue(msg *message.Message) error {
+func (q *Queue) Requeue(ctx context.Context, msg *message.Message) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -147,9 +150,14 @@ func (q *Queue) Requeue(msg *message.Message) error {
 
 	select {
 	case q.retrySignal <- struct{}{}:
-	default:
+		return nil
+	case <-ctx.Done():
+		q.logger.Warn("Requeue cancelled by context", "msg_id", msg.ID)
+		return ctx.Err()
+	case <-q.stopChan:
+		q.logger.Warn("Requeue failed, queue is stopping", "msg_id", msg.ID)
+		return ErrQueueClosed
 	}
-	return nil
 }
 
 // Dequeue removes and returns the next message ready for processing.

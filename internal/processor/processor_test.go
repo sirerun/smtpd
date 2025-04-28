@@ -31,7 +31,7 @@ func newMockQueue(bufferSize int) *mockQueue {
 	}
 }
 
-func (mq *mockQueue) Enqueue(msg *message.Message) error {
+func (mq *mockQueue) Enqueue(ctx context.Context, msg *message.Message) error {
 	mq.mu.Lock()
 	if mq.closed {
 		mq.mu.Unlock()
@@ -46,7 +46,7 @@ func (mq *mockQueue) Enqueue(msg *message.Message) error {
 	}
 }
 
-func (mq *mockQueue) Requeue(msg *message.Message) error {
+func (mq *mockQueue) Requeue(ctx context.Context, msg *message.Message) error {
 	mq.mu.Lock()
 	if mq.closed {
 		mq.mu.Unlock()
@@ -129,7 +129,7 @@ func TestQueueProcessor_Run_SingleWorker_SimpleCases(t *testing.T) {
 	mdSuccess.deliverFunc = func(ctx context.Context, m *message.Message) error {
 		return nil
 	}
-	require.NoError(t, mqSuccess.Enqueue(msgSuccess))
+	require.NoError(t, mqSuccess.Enqueue(context.Background(), msgSuccess))
 	time.Sleep(50 * time.Millisecond) // Allow processing
 	pSuccess.Stop()
 	mqSuccess.Close()
@@ -145,7 +145,7 @@ func TestQueueProcessor_Run_SingleWorker_SimpleCases(t *testing.T) {
 	mdRetry.deliverFunc = func(ctx context.Context, m *message.Message) error {
 		return fmt.Errorf("temporary failure")
 	}
-	require.NoError(t, mqRetry.Enqueue(msgRetry))
+	require.NoError(t, mqRetry.Enqueue(context.Background(), msgRetry))
 	time.Sleep(50 * time.Millisecond)
 	pRetry.Stop()
 	mqRetry.Close()
@@ -169,7 +169,7 @@ func TestQueueProcessor_Run_SingleWorker_SimpleCases(t *testing.T) {
 	mdPerm.deliverFunc = func(ctx context.Context, m *message.Message) error {
 		return fmt.Errorf("permanent failure")
 	}
-	require.NoError(t, mqPerm.Enqueue(msgPerm))
+	require.NoError(t, mqPerm.Enqueue(context.Background(), msgPerm))
 	time.Sleep(50 * time.Millisecond)
 	pPerm.Stop()
 	mqPerm.Close()
@@ -224,7 +224,7 @@ func TestQueueProcessor_ParallelRun_Counts(t *testing.T) {
 			id = fmt.Sprintf("good-%d", i)
 			msg = &message.Message{ID: id, From: "good@test.com", To: []string{"rcpt@success.com"}}
 		}
-		err := mq.Enqueue(msg)
+		err := mq.Enqueue(context.Background(), msg)
 		require.NoError(t, err, "Failed to enqueue message %s", id)
 	}
 

@@ -109,7 +109,9 @@ func (p *SPFChecker) OnMailFrom(ctx context.Context, session *plugin.SessionInfo
 	logger.Info("Initiating SPF check")
 
 	// Perform DNS TXT lookup for SPF record
-	txtRecords, err := p.resolver.LookupTXT(ctx, domain)
+	var txtRecords []string
+var err error
+txtRecords, err = p.resolver.LookupTXT(ctx, domain)
 	finalResult := None
 	var returnErr error = nil
 
@@ -122,7 +124,7 @@ func (p *SPFChecker) OnMailFrom(ctx context.Context, session *plugin.SessionInfo
 				logger.Warn("DNS lookup timed out during SPF check", "error", err)
 				finalResult = TempError
 				returnErr = smtp.NewError(451, "4.3.2", "Temporary error: DNS lookup timeout during SPF check")
-			} else if dnsErr.Temporary() {
+			} else if dnsErr.IsTemporary {
 				logger.Warn("Temporary DNS error during SPF check", "error", err)
 				finalResult = TempError
 				returnErr = smtp.NewError(451, "4.3.0", "Temporary error: Cannot resolve SPF record")
@@ -230,7 +232,6 @@ func getClientIP(session *plugin.SessionInfo) net.IP {
 		return ipAddr.IP
 	}
 	// Use default logger or inject one if this needs logging
-	// log.Printf("SPF Check: Unsupported remote address type: %T", session.RemoteAddr)
 	logging.Default().Warn("Unsupported remote address type for SPF check", "type", fmt.Sprintf("%T", session.RemoteAddr)) // Requires fmt import
 	return nil
 }

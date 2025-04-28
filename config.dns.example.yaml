@@ -1,0 +1,6 @@
+# DNS caching and max lookup configuration for smtpd
+
+dns:
+  cache_ttl: 300s
+  max_lookups_per_msg: 10
+  max_cache_size: 1000

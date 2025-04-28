@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mailtive/smtpd/internal/logging"
 	"github.com/mailtive/smtpd/internal/metrics"
 )
 
@@ -68,6 +69,7 @@ func NewConnectionFilter(allowedIPs, blockedIPs []string, allowedDomains, blocke
 	for _, ipStr := range allowedIPs {
 		_, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
+			logging.Default().Error("Invalid allowed IP in NewConnectionFilter", "ip", ipStr, "error", err)
 			return nil, fmt.Errorf("invalid allowed IP: %w", err)
 		}
 		filter.allowedIPs = append(filter.allowedIPs, ipNet)
@@ -77,6 +79,7 @@ func NewConnectionFilter(allowedIPs, blockedIPs []string, allowedDomains, blocke
 	for _, ipStr := range blockedIPs {
 		_, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
+			logging.Default().Error("Invalid blocked IP in NewConnectionFilter", "ip", ipStr, "error", err)
 			return nil, fmt.Errorf("invalid blocked IP: %w", err)
 		}
 		filter.blockedIPs = append(filter.blockedIPs, ipNet)
@@ -159,6 +162,7 @@ func (f *ConnectionFilter) UpdateFilters(allowedIPs, blockedIPs []string, allowe
 	for _, ipStr := range allowedIPs {
 		_, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
+			logging.Default().Error("Invalid allowed IP in UpdateFilters", "ip", ipStr, "error", err)
 			return fmt.Errorf("invalid allowed IP: %w", err)
 		}
 		newAllowedIPs = append(newAllowedIPs, ipNet)
@@ -169,6 +173,7 @@ func (f *ConnectionFilter) UpdateFilters(allowedIPs, blockedIPs []string, allowe
 	for _, ipStr := range blockedIPs {
 		_, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
+			logging.Default().Error("Invalid blocked IP in UpdateFilters", "ip", ipStr, "error", err)
 			return fmt.Errorf("invalid blocked IP: %w", err)
 		}
 		newBlockedIPs = append(newBlockedIPs, ipNet)

@@ -21,6 +21,29 @@ type Config struct {
 	Plugins  PluginsConfig  `json:"plugins" yaml:"plugins"`
 	Security SecurityConfig `json:"security" yaml:"security"`
 	Outbound OutboundConfig `json:"outbound" yaml:"outbound"`
+	DNS      DNSConfig      `json:"dns" yaml:"dns"`
+	DMARCReporting DMARCReportingConfig `json:"dmarc_reporting" yaml:"dmarc_reporting"`
+}
+
+// DMARCReportingConfig holds config for DMARC aggregate reporting.
+type DMARCReportingConfig struct {
+	Enabled        bool          `json:"enabled" yaml:"enabled"`
+	ReportInterval time.Duration `json:"report_interval" yaml:"report_interval"`
+	StoragePath    string        `json:"storage_path" yaml:"storage_path"`
+}
+
+
+// DNSConfig holds DNS caching and lookup limits
+// Example YAML:
+// dns:
+//   cache_ttl: 300s
+//   max_lookups_per_msg: 10
+//   max_cache_size: 1000
+//
+type DNSConfig struct {
+	CacheTTL         time.Duration `json:"cache_ttl" yaml:"cache_ttl"`
+	MaxLookupsPerMsg int           `json:"max_lookups_per_msg" yaml:"max_lookups_per_msg"`
+	MaxCacheSize     int           `json:"max_cache_size" yaml:"max_cache_size"`
 }
 
 // ServerConfig holds server-specific configuration
