@@ -13,14 +13,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mailtive/smtpd/internal/auth"
-	"github.com/mailtive/smtpd/internal/config"
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/internal/metrics"
-	"github.com/mailtive/smtpd/internal/outbound"
-	"github.com/mailtive/smtpd/internal/processor"
-	"github.com/mailtive/smtpd/internal/queue"
-	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/internal/auth"
+	"github.com/sirerun/smtpd/internal/config"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/metrics"
+	"github.com/sirerun/smtpd/internal/outbound"
+	"github.com/sirerun/smtpd/internal/processor"
+	"github.com/sirerun/smtpd/internal/queue"
+	"github.com/sirerun/smtpd/pkg/plugin"
 )
 
 // ServerConfig represents the configuration for the SMTP server
@@ -281,7 +281,7 @@ func NewServerWithOptions(opts ServerOptions) (*Server, error) {
 	// Create TLSConfig
 	var tlsCfg *TLSConfig
 	if opts.Config.Security.TLSEnabled {
-		tlsCfg, err = NewTLSConfig(opts.Config.Security.TLSCertFile, opts.Config.Security.TLSKeyFile)
+		tlsCfg, err = NewTLSConfig(opts.Config.Security.TLSCertFile, opts.Config.Security.TLSKeyFile, "")
 		if err != nil {
 			logger.Error("Failed to create TLS config from security settings", "error", err)
 			return nil, fmt.Errorf("failed to load TLS cert/key: %w", err)

@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/metrics"
+	"github.com/sirerun/smtpd/internal/metrics"
 )
 
 // LogLevel represents the logging level

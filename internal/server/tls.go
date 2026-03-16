@@ -17,8 +17,9 @@ type TLSConfig struct {
 	CAFile string
 }
 
-// NewTLSConfig creates a new TLS configuration
-func NewTLSConfig(certFile, keyFile string) (*TLSConfig, error) {
+// NewTLSConfig creates a new TLS configuration.
+// caFile is optional; pass "" to skip client certificate validation.
+func NewTLSConfig(certFile, keyFile, caFile string) (*TLSConfig, error) {
 	if certFile == "" || keyFile == "" {
 		return nil, errors.New("certificate and key files are required")
 	}
@@ -26,6 +27,7 @@ func NewTLSConfig(certFile, keyFile string) (*TLSConfig, error) {
 	return &TLSConfig{
 		CertFile: certFile,
 		KeyFile:  keyFile,
+		CAFile:   caFile,
 	}, nil
 }
 

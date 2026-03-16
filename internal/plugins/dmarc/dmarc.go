@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/emersion/go-dkim"
-	"github.com/mailtive/smtpd/internal/ctxkeys"
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/internal/config"
-	"github.com/mailtive/smtpd/internal/plugins/spf"
-	"github.com/mailtive/smtpd/pkg/plugin"
-	pkgsmtp "github.com/mailtive/smtpd/pkg/smtp"
+	"github.com/sirerun/smtpd/internal/ctxkeys"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/config"
+	"github.com/sirerun/smtpd/internal/plugins/spf"
+	"github.com/sirerun/smtpd/pkg/plugin"
+	pkgsmtp "github.com/sirerun/smtpd/pkg/smtp"
 )
 
 var eventStore = &DMARCEventStore{}
@@ -148,7 +148,7 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 		return pkgsmtp.NewError(451, "4.6.0", "Error processing message headers for DMARC")
 	}
 	// Extract domain from address string (user@domain)
-	fromDomain := ""
+	fromDomain = ""
 	if parts := strings.Split(fromHeaderAddr.Address, "@"); len(parts) == 2 {
 		fromDomain = parts[1]
 	}
@@ -161,7 +161,7 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 	// 2. Get SPF Result from Context
 	spfValue := ctx.Value(ctxkeys.SPFResultKey)
 	// Use the correctly exported type spf.StoredSPFResult
-	spfResultData, spfOk = spfValue.(spf.StoredSPFResult)
+	spfResultData, spfOk := spfValue.(spf.StoredSPFResult)
 	spfResult := spf.None // Default if not found
 	spfDomain := ""
 	if spfOk {
@@ -172,7 +172,7 @@ func (p *DMARCChecker) OnMessage(ctx context.Context, session *plugin.SessionInf
 
 	// 3. Get DKIM Results from Context
 	dkimValue := ctx.Value(ctxkeys.DKIMResultsKey)
-	dkimResults, dkimOk = dkimValue.([]*dkim.Verification)
+	dkimResults, dkimOk := dkimValue.([]*dkim.Verification)
 	if !dkimOk {
 		dkimResults = []*dkim.Verification{} // Ensure non-nil slice
 	}

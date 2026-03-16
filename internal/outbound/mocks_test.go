@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/logging"
 	"github.com/stretchr/testify/require"
 )
 

@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mailtive/smtpd/internal/auth"
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/internal/message"
-	"github.com/mailtive/smtpd/internal/metrics"
-	"github.com/mailtive/smtpd/internal/queue"
-	"github.com/mailtive/smtpd/pkg/plugin"
-	"github.com/mailtive/smtpd/pkg/smtp"
+	"github.com/sirerun/smtpd/internal/auth"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/message"
+	"github.com/sirerun/smtpd/internal/metrics"
+	"github.com/sirerun/smtpd/internal/queue"
+	"github.com/sirerun/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/pkg/smtp"
 )
 
 // SessionState represents the current state of an SMTP session

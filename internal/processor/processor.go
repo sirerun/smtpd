@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/internal/message"
-	"github.com/mailtive/smtpd/internal/metrics"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/message"
+	"github.com/sirerun/smtpd/internal/metrics"
 )
 
 // Define retry parameters

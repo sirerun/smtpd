@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/internal/metrics"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/metrics"
 )
 
 // RateLimiter implements token bucket rate limiting
@@ -58,18 +58,23 @@ type ConnectionFilter struct {
 	blockedIPs     []*net.IPNet
 	allowedDomains []string
 	blockedDomains []string
+	logger         *logging.Logger
 	mu             sync.RWMutex
 }
 
 // NewConnectionFilter creates a new connection filter
 func NewConnectionFilter(allowedIPs, blockedIPs []string, allowedDomains, blockedDomains []string) (*ConnectionFilter, error) {
-	filter := &ConnectionFilter{}
+	logger := logging.Default()
+	if logger == nil {
+		logger = logging.New(logging.DefaultConfig())
+	}
+	filter := &ConnectionFilter{logger: logger}
 
 	// Parse allowed IPs
 	for _, ipStr := range allowedIPs {
 		_, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
-			logging.Default().Error("Invalid allowed IP in NewConnectionFilter", "ip", ipStr, "error", err)
+			filter.logger.Error("Invalid allowed IP in NewConnectionFilter", "ip", ipStr, "error", err)
 			return nil, fmt.Errorf("invalid allowed IP: %w", err)
 		}
 		filter.allowedIPs = append(filter.allowedIPs, ipNet)
@@ -79,7 +84,7 @@ func NewConnectionFilter(allowedIPs, blockedIPs []string, allowedDomains, blocke
 	for _, ipStr := range blockedIPs {
 		_, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
-			logging.Default().Error("Invalid blocked IP in NewConnectionFilter", "ip", ipStr, "error", err)
+			filter.logger.Error("Invalid blocked IP in NewConnectionFilter", "ip", ipStr, "error", err)
 			return nil, fmt.Errorf("invalid blocked IP: %w", err)
 		}
 		filter.blockedIPs = append(filter.blockedIPs, ipNet)
@@ -162,7 +167,7 @@ func (f *ConnectionFilter) UpdateFilters(allowedIPs, blockedIPs []string, allowe
 	for _, ipStr := range allowedIPs {
 		_, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
-			logging.Default().Error("Invalid allowed IP in UpdateFilters", "ip", ipStr, "error", err)
+			f.logger.Error("Invalid allowed IP in UpdateFilters", "ip", ipStr, "error", err)
 			return fmt.Errorf("invalid allowed IP: %w", err)
 		}
 		newAllowedIPs = append(newAllowedIPs, ipNet)
@@ -173,7 +178,7 @@ func (f *ConnectionFilter) UpdateFilters(allowedIPs, blockedIPs []string, allowe
 	for _, ipStr := range blockedIPs {
 		_, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
-			logging.Default().Error("Invalid blocked IP in UpdateFilters", "ip", ipStr, "error", err)
+			f.logger.Error("Invalid blocked IP in UpdateFilters", "ip", ipStr, "error", err)
 			return fmt.Errorf("invalid blocked IP: %w", err)
 		}
 		newBlockedIPs = append(newBlockedIPs, ipNet)

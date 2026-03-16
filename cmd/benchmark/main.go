@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/benchmark"
+	"github.com/sirerun/smtpd/internal/benchmark"
 )
 
 func main() {

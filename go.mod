@@ -1,4 +1,4 @@
-module github.com/mailtive/smtpd
+module github.com/sirerun/smtpd
 
 go 1.22
 

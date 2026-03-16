@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/pkg/plugin"
-	"github.com/mailtive/smtpd/pkg/smtp"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/pkg/smtp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

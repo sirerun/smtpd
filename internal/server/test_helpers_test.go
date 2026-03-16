@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/auth"
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/internal/queue"
-	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/internal/auth"
+	"github.com/sirerun/smtpd/internal/config"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/queue"
+	"github.com/sirerun/smtpd/pkg/plugin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,6 +21,37 @@ import (
 var testSessionLogger = logging.New(logging.DefaultConfig()).WithComponent("session")
 var testUserStore = auth.NewStore()
 var testQueue = queue.NewQueue(10, testSessionLogger)
+
+// newTestServer creates a test server with the new API. Pass nil for tlsConfig if not needed.
+func newTestServer(t testing.TB, tlsConfig *TLSConfig) (*Server, error) {
+	return newTestServerWithPort(t, tlsConfig, 0)
+}
+
+// newTestServerWithPort creates a test server listening on ":0" with optional TLS and an intended port for forceTLS logic.
+func newTestServerWithPort(t testing.TB, tlsConfig *TLSConfig, intendedPort int) (*Server, error) {
+	cfg := config.DefaultConfig()
+	cfg.Server.ListenAddr = "127.0.0.1:0"
+	cfg.Server.Port = intendedPort
+	if intendedPort == 0 {
+		cfg.Server.Port = 25 // Needs a valid port for validation
+	}
+	cfg.Server.SubmissionPort = 587
+	if tlsConfig != nil {
+		cfg.Security.TLSEnabled = true
+		cfg.Security.TLSCertFile = tlsConfig.CertFile
+		cfg.Security.TLSKeyFile = tlsConfig.KeyFile
+	}
+
+	q := queue.NewQueue(100, testLogger)
+	pm := plugin.NewManager()
+
+	return NewServerWithOptions(ServerOptions{
+		Config:        cfg,
+		Logger:        testLogger,
+		Queue:         q,
+		PluginManager: pm,
+	})
+}
 
 // Mock connection implementation
 type mockConn struct {

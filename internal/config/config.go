@@ -7,9 +7,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/mailtive/smtpd/internal/auth"
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/internal/auth"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/pkg/plugin"
 )
 
 // Config represents the server configuration

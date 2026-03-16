@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/emersion/go-dkim"
-	"github.com/mailtive/smtpd/internal/message"
+	"github.com/sirerun/smtpd/internal/message"
 )
 
 // DeliveryResult indicates the outcome of a delivery attempt for a specific domain.

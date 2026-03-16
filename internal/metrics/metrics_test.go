@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/message"
-	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/internal/message"
+	"github.com/sirerun/smtpd/pkg/plugin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"

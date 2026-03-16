@@ -6,10 +6,10 @@ import (
 	"net"
 	"strings"
 
-	"github.com/mailtive/smtpd/internal/ctxkeys"
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/pkg/plugin"
-	"github.com/mailtive/smtpd/pkg/smtp"
+	"github.com/sirerun/smtpd/internal/ctxkeys"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/pkg/smtp"
 )
 
 // SPFChecker implements the plugin.Plugin interface for SPF checks.

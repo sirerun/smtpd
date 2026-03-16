@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mailtive/smtpd/pkg/plugin"
-	"github.com/mailtive/smtpd/pkg/smtp"
+	"github.com/sirerun/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/pkg/smtp"
 )
 
 // RateLimiter is a plugin that limits the number of emails a sender can send within a time window.

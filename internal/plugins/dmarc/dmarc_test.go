@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	"github.com/emersion/go-msgauth/dkim"
-	"github.com/mailtive/smtpd/internal/ctxkeys"
-	"github.com/mailtive/smtpd/internal/logging"
-	spfPlugin "github.com/mailtive/smtpd/internal/plugins/spf"
-	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/internal/ctxkeys"
+	"github.com/sirerun/smtpd/internal/logging"
+	spfPlugin "github.com/sirerun/smtpd/internal/plugins/spf"
+	"github.com/sirerun/smtpd/pkg/plugin"
 	"github.com/stretchr/testify/assert"
 )
 

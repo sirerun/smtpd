@@ -2,7 +2,7 @@ package dmarc
 
 import (
 	"context"
-	"github.com/mailtive/smtpd/internal/dns"
+	"github.com/sirerun/smtpd/internal/dns"
 )
 
 type cachingResolver struct {

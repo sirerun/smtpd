@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/pkg/plugin"
 )
 
 func TestRateLimiter(t *testing.T) {

@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/auth"
-	"github.com/mailtive/smtpd/pkg/plugin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,13 +73,8 @@ func TestTLSConfig(t *testing.T) {
 }
 
 func TestSTARTTLS(t *testing.T) {
-	// Create a test server with TLS config
-	tlsInternalConfig, err := NewTLSConfig("testdata/cert.pem", "testdata/key.pem", "")
-	require.NoError(t, err, "Failed to create TLS config")
-
-	userStore := auth.NewStore()
-	// Use the global testLogger defined in server_test.go
-	srv, err := NewServerWithConfig(":0", 0, tlsInternalConfig, userStore, []plugin.Plugin{}, testLogger, createTestServerConfig())
+	tlsCfg := &TLSConfig{CertFile: "testdata/cert.pem", KeyFile: "testdata/key.pem"}
+	srv, err := newTestServer(t, tlsCfg)
 	require.NoError(t, err, "Failed to create server")
 
 	t.Cleanup(func() {
@@ -123,7 +116,7 @@ func TestSTARTTLS(t *testing.T) {
 	defer cancel()
 	err = tlsConn.HandshakeContext(hshakeCtx)
 	require.NoError(t, err, "TLS handshake failed")
-	defer tlsConn.Close() // Ensure TLS conn is also closed
+	defer tlsConn.Close()
 
 	// Verify the connection is encrypted
 	state := tlsConn.ConnectionState()
@@ -142,13 +135,8 @@ func TestSTARTTLS(t *testing.T) {
 }
 
 func TestSubmissionPort(t *testing.T) {
-	// Create a test server with TLS config
-	tlsInternalConfig, err := NewTLSConfig("testdata/cert.pem", "testdata/key.pem", "")
-	require.NoError(t, err, "Failed to create TLS config")
-
-	userStore := auth.NewStore()
-	// Use the global testLogger and pass intended port 587
-	srv, err := NewServerWithConfig(":0", 587, tlsInternalConfig, userStore, []plugin.Plugin{}, testLogger, createTestServerConfig())
+	tlsCfg := &TLSConfig{CertFile: "testdata/cert.pem", KeyFile: "testdata/key.pem"}
+	srv, err := newTestServerWithPort(t, tlsCfg, 587)
 	require.NoError(t, err, "Failed to create server for submission port")
 
 	t.Cleanup(func() {

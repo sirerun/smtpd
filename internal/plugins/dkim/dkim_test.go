@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"github.com/emersion/go-msgauth/dkim"
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/internal/message"
-	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/message"
+	"github.com/sirerun/smtpd/pkg/plugin"
 	"github.com/stretchr/testify/assert"
 )
 

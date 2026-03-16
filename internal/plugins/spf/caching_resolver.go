@@ -2,8 +2,8 @@ package spf
 
 import (
 	"context"
-	"github.com/mailtive/smtpd/internal/dns"
-	"github.com/mailtive/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/dns"
+	"github.com/sirerun/smtpd/internal/logging"
 )
 
 type cachingResolver struct {

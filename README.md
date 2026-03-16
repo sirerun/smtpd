@@ -1,6 +1,6 @@
 # Mailtive SMTPd
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/mailtive/smtpd.svg)](https://pkg.go.dev/github.com/mailtive/smtpd)
+[![Go Reference](https://pkg.go.dev/badge/github.com/sirerun/smtpd.svg)](https://pkg.go.dev/github.com/sirerun/smtpd)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 <!-- Add badges for Build Status, Code Coverage, Go Report Card etc. once CI/CD is set up -->
 
@@ -34,7 +34,7 @@ Whether you need a simple mail relay, a server for development testing, or a fou
 **From Source:**
 
 ```bash
-go install github.com/mailtive/smtpd/cmd/smtpd@latest
+go install github.com/sirerun/smtpd/cmd/smtpd@latest
 ```
 
 This will install the `smtpd` binary in your `$GOPATH/bin` directory.
@@ -42,7 +42,7 @@ This will install the `smtpd` binary in your `$GOPATH/bin` directory.
 **(Optional) Build from Clone:**
 
 ```bash
-git clone https://github.com/mailtive/smtpd.git
+git clone https://github.com/sirerun/smtpd.git
 cd smtpd
 go build ./cmd/smtpd
 ```
@@ -131,4 +131,4 @@ This project is licensed under the **Apache License 2.0**. See the [LICENSE](LIC
 
 ## Support
 
-Please report bugs or request features using the [GitHub Issues](https://github.com/mailtive/smtpd/issues) tracker. 
+Please report bugs or request features using the [GitHub Issues](https://github.com/sirerun/smtpd/issues) tracker. 

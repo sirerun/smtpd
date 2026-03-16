@@ -7,9 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mailtive/smtpd/internal/auth"
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/pkg/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,9 +23,7 @@ func createTestServerConfig() *ServerConfig {
 }
 
 func TestServerStartStop(t *testing.T) {
-	addr := "127.0.0.1:0" // Use port 0 for automatic assignment
-	userStore := auth.NewStore()
-	srv, err := NewServer(addr, 0, nil, userStore, testPlugins, testLogger) // Pass logger
+	srv, err := newTestServer(t, nil)
 	require.NoError(t, err)
 
 	// Start server
@@ -49,8 +46,7 @@ func TestServerStartStop(t *testing.T) {
 }
 
 func TestServerGracefulShutdown(t *testing.T) {
-	userStore := auth.NewStore()
-	srv, err := NewServer(":0", 0, nil, userStore, testPlugins, testLogger)
+	srv, err := newTestServer(t, nil)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -66,7 +62,7 @@ func TestServerGracefulShutdown(t *testing.T) {
 	// Create a connection that we'll keep open
 	conn, err := net.Dial("tcp", srv.listener.Addr().String())
 	require.NoError(t, err, "Failed to connect to server")
-	defer conn.Close() // Close connection when test finishes
+	defer conn.Close()
 
 	// Read the initial greeting
 	reader := bufio.NewReader(conn)
@@ -77,11 +73,10 @@ func TestServerGracefulShutdown(t *testing.T) {
 	stopErrCh := make(chan error, 1)
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		stopErrCh <- srv.Stop() // Send stop error (or nil) to channel
+		stopErrCh <- srv.Stop()
 	}()
 
 	// The connection should be closed by the server during Stop()
-	// Reading from it should result in an error (e.g., EOF)
 	_, err = reader.ReadByte()
 	require.Error(t, err, "Expected connection to be closed by server, read succeeded")
 	t.Logf("Got expected error after server stop: %v", err)
@@ -92,9 +87,7 @@ func TestServerGracefulShutdown(t *testing.T) {
 }
 
 func TestServerMessageDelivery(t *testing.T) {
-	userStore := auth.NewStore()
-	// Use NewServerWithConfig for clarity, though NewServer works too
-	srv, err := NewServerWithConfig(":0", 0, nil, userStore, testPlugins, testLogger, createTestServerConfig())
+	srv, err := newTestServer(t, nil)
 	require.NoError(t, err)
 	err = srv.Start()
 	require.NoError(t, err)
@@ -125,18 +118,12 @@ func TestServerMessageDelivery(t *testing.T) {
 	writeCmd(t, conn, "QUIT")
 	readExpected(t, reader, "221")
 
-	// TODO: Verify message queuing
-	// This requires either a mock queue or a way to inspect the real queue.
-	// For now, test confirms the SMTP transaction completes.
 	t.Log("Message delivery test passed basic checks (enqueue not verified)")
 }
 
 func TestServerPort587_Integration(t *testing.T) {
-	addr := "127.0.0.1:0"
-	tlsConfig := &TLSConfig{CertFile: "../testdata/cert.pem", KeyFile: "../testdata/key.pem"}
-	userStore := auth.NewStore()
-	// Pass intendedPort=587 to trigger forceTLS logic
-	srv, err := NewServerWithConfig(addr, 587, tlsConfig, userStore, testPlugins, testLogger, createTestServerConfig())
+	tlsCfg := &TLSConfig{CertFile: "../testdata/cert.pem", KeyFile: "../testdata/key.pem"}
+	srv, err := newTestServerWithPort(t, tlsCfg, 587)
 	require.NoError(t, err, "NewServer failed for port 587")
 
 	err = srv.Start()
@@ -170,7 +157,6 @@ func TestServerPort587_Integration(t *testing.T) {
 	requiredCapabilities := map[string]bool{
 		"AUTH PLAIN LOGIN": true, // Expect AUTH since TLS is established
 		"SIZE":             true, // Expect SIZE
-		// STARTTLS should NOT be advertised here
 	}
 	capabilitiesFound := readEHLO(t, reader)
 
@@ -194,6 +180,3 @@ func TestTLSConfig_CreateTLSConfig(t *testing.T) {
 }
 
 // Helper functions moved to test_helpers_test.go
-// func readExpected(t *testing.T, r *bufio.Reader, prefix string) {
-// func writeCmd(t *testing.T, conn net.Conn, cmd string) {
-// func readEHLO(t *testing.T, r *bufio.Reader) map[string]bool {

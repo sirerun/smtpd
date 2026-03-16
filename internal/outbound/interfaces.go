@@ -7,8 +7,8 @@ import (
 	"net"
 
 	"github.com/emersion/go-dkim"
-	"github.com/mailtive/smtpd/internal/logging"
-	"github.com/mailtive/smtpd/internal/metrics"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/metrics"
 )
 
 // Resolver defines the interface for DNS lookups.

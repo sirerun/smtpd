@@ -18,12 +18,12 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/mailtive/smtpd/internal/auth"
-	"github.com/mailtive/smtpd/internal/config"
-	"github.com/mailtive/smtpd/internal/health"
-	"github.com/mailtive/smtpd/internal/logging" // Import the internal logging package
-	"github.com/mailtive/smtpd/internal/server"
-	"github.com/mailtive/smtpd/pkg/plugin"
+	"github.com/sirerun/smtpd/internal/config"
+	"github.com/sirerun/smtpd/internal/health"
+	"github.com/sirerun/smtpd/internal/logging"
+	"github.com/sirerun/smtpd/internal/queue"
+	"github.com/sirerun/smtpd/internal/server"
+	"github.com/sirerun/smtpd/pkg/plugin"
 )
 
 const appVersion = "1.0.0" // Define app version constant
@@ -181,12 +181,7 @@ func run(ctx context.Context, args []string) error {
 	// --- Component Initialization ---
 	healthChecker := health.NewHealthChecker() // TODO: Pass logger to healthChecker?
 
-	var tlsConfig *server.TLSConfig
 	if cfg.Security.TLSEnabled {
-		tlsConfig = &server.TLSConfig{
-			CertFile: cfg.Security.TLSCertFile,
-			KeyFile:  cfg.Security.TLSKeyFile,
-		}
 		logger.Info("TLS enabled")
 	}
 
@@ -206,40 +201,38 @@ func run(ctx context.Context, args []string) error {
 		logger.Info("Validated TLS configuration for submission port", "address", submissionAddr)
 	}
 
-	serverConfig := cfg.CreateServerConfig(logger) // Pass logger to CreateServerConfig if needed
+	// Create queue for message processing
+	q := queue.NewQueue(cfg.Server.ConnectionBacklog, logger)
 
-	// TODO: Initialize Auth Store based on cfg.Auth, passing logger
-	var authStore auth.AuthStore // Use auth.AuthStore from internal/auth
+	// Create plugin manager
+	pm := plugin.NewManager()
 
-	// TODO: Load Plugins based on cfg.Plugins, passing logger
-	var loadedPlugins []plugin.Plugin // Placeholder
-
-	// Create server instances, passing the specific logger instance
+	// Create main server
 	mainServerLogger := logger.WithComponent("server.main")
-	mainServer, err := server.NewServerWithConfig(
-		fmt.Sprintf("%s:%d", cfg.Server.ListenAddr, cfg.Server.Port),
-		cfg.Server.Port,
-		tlsConfig,
-		authStore,
-		loadedPlugins,
-		mainServerLogger, // Pass the logging.Logger instance
-		serverConfig,
-	)
+	mainCfg := *cfg
+	mainCfg.Server.ListenAddr = fmt.Sprintf("%s:%d", cfg.Server.ListenAddr, cfg.Server.Port)
+	mainServer, err := server.NewServerWithOptions(server.ServerOptions{
+		Config:        &mainCfg,
+		Logger:        mainServerLogger,
+		Queue:         q,
+		PluginManager: pm,
+	})
 	if err != nil {
 		logger.Error("Failed to create main server", "error", err)
 		return fmt.Errorf("failed to create main server: %w", err)
 	}
 
+	// Create submission server
 	submissionServerLogger := logger.WithComponent("server.submission")
-	submissionServer, err := server.NewServerWithConfig(
-		fmt.Sprintf("%s:%d", cfg.Server.ListenAddr, cfg.Server.SubmissionPort),
-		cfg.Server.SubmissionPort,
-		tlsConfig,
-		authStore,
-		loadedPlugins,
-		submissionServerLogger, // Pass the logging.Logger instance
-		serverConfig,
-	)
+	subCfg := *cfg
+	subCfg.Server.ListenAddr = fmt.Sprintf("%s:%d", cfg.Server.ListenAddr, cfg.Server.SubmissionPort)
+	subCfg.Server.Port = cfg.Server.SubmissionPort
+	submissionServer, err := server.NewServerWithOptions(server.ServerOptions{
+		Config:        &subCfg,
+		Logger:        submissionServerLogger,
+		Queue:         q,
+		PluginManager: pm,
+	})
 	if err != nil {
 		logger.Error("Failed to create submission server", "error", err)
 		return fmt.Errorf("failed to create submission server: %w", err)
