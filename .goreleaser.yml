@@ -1,0 +1,54 @@
+version: 2
+
+builds:
+  - main: ./cmd/smtpd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore\\(deps\\):"
+  groups:
+    - title: "Breaking Changes"
+      regexp: '^.*?!:.+$'
+      order: 0
+    - title: "Features"
+      regexp: '^feat.*'
+      order: 1
+    - title: "Bug Fixes"
+      regexp: '^fix.*'
+      order: 2
+    - title: "Performance"
+      regexp: '^perf.*'
+      order: 3
+    - title: "Other"
+      order: 999
+
+release:
+  github:
+    owner: sirerun
+    name: smtpd
+  prerelease: auto
+  make_latest: true
