@@ -17,7 +17,7 @@ import (
 	"github.com/sirerun/smtpd/internal/config"
 	"github.com/sirerun/smtpd/internal/logging"
 	"github.com/sirerun/smtpd/internal/metrics"
-	"github.com/sirerun/smtpd/internal/outbound"
+	"github.com/sirerun/smtpd/pkg/outbound"
 	"github.com/sirerun/smtpd/internal/processor"
 	"github.com/sirerun/smtpd/internal/queue"
 	"github.com/sirerun/smtpd/pkg/plugin"
