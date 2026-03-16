@@ -43,30 +43,31 @@ const (
 
 // Session represents an SMTP session
 type Session struct {
-	conn       net.Conn
-	reader     *bufio.Reader
-	writer     *bufio.Writer
-	state      SessionState
-	from       string
-	to         []string
-	queue      *queue.Queue
-	tlsConfig  *TLSConfig
-	tlsConn    *tls.Conn
-	forceTLS   bool
-	tls        bool
-	auth       bool
-	userStore  auth.AuthStore
-	plugins    []plugin.Plugin
-	helo       string
-	sender     string
-	recipients []string
-	data       []byte
-	serverName string
-	remoteAddr net.Addr
-	ctx        context.Context
-	baseCtx    context.Context
-	logger     *logging.Logger
-	sessionID  string
+	conn         net.Conn
+	reader       *bufio.Reader
+	writer       *bufio.Writer
+	state        SessionState
+	from         string
+	to           []string
+	queue        *queue.Queue
+	tlsConfig    *TLSConfig
+	tlsConn      *tls.Conn
+	forceTLS     bool
+	tls          bool
+	auth         bool
+	userStore    auth.AuthStore
+	jwtValidator auth.JWTValidator
+	plugins      []plugin.Plugin
+	helo         string
+	sender       string
+	recipients   []string
+	data         []byte
+	serverName   string
+	remoteAddr   net.Addr
+	ctx          context.Context
+	baseCtx      context.Context
+	logger       *logging.Logger
+	sessionID    string
 
 	// Timeouts and buffer management
 	readTimeout    time.Duration
@@ -76,7 +77,7 @@ type Session struct {
 }
 
 // Reset reinitializes a session for reuse
-func (s *Session) Reset(conn net.Conn, q *queue.Queue, tlsConfig *TLSConfig, userStore auth.AuthStore, plugins []plugin.Plugin, logger *logging.Logger, sessionID string) {
+func (s *Session) Reset(conn net.Conn, q *queue.Queue, tlsConfig *TLSConfig, userStore auth.AuthStore, jwtValidator auth.JWTValidator, plugins []plugin.Plugin, logger *logging.Logger, sessionID string) {
 	// Set default timeout values if not already set
 	if s.readTimeout == 0 {
 		s.readTimeout = DefaultReadTimeout
@@ -103,6 +104,7 @@ func (s *Session) Reset(conn net.Conn, q *queue.Queue, tlsConfig *TLSConfig, use
 	s.tls = false
 	s.auth = false
 	s.userStore = userStore
+	s.jwtValidator = jwtValidator
 	s.plugins = plugins
 	s.helo = ""
 	s.serverName = "smtpd" // Default server name
@@ -270,7 +272,11 @@ func (s *Session) handleHelo(command string, domain string) error {
 	if s.tls || s.forceTLS {
 		// For TLS connections, add SIZE and AUTH capabilities (required for TestServerPort587)
 		capabilities = append(capabilities, "SIZE 10485760")
-		capabilities = append(capabilities, "AUTH PLAIN LOGIN")
+		authMechanisms := "AUTH PLAIN LOGIN"
+		if s.jwtValidator != nil {
+			authMechanisms += " SIRE-TOKEN"
+		}
+		capabilities = append(capabilities, authMechanisms)
 	}
 
 	// Add standard capabilities
@@ -606,6 +612,8 @@ func (s *Session) handleAuth(line string) error {
 		return s.handleAuthPlain(parts)
 	case "LOGIN":
 		return s.handleAuthLogin(parts)
+	case "SIRE-TOKEN":
+		return s.handleAuthSireToken(parts)
 	default:
 		s.logger.Warn("Unsupported AUTH mechanism", "mechanism", mechanism)
 		return s.writeResponse(504, "Unsupported authentication mechanism")
@@ -722,6 +730,34 @@ func (s *Session) handleAuthLogin(parts []string) error {
 	}
 
 	s.logger.Info("Authentication successful", "username", username)
+	s.auth = true
+	return s.writeResponse(235, "Authentication successful")
+}
+
+// handleAuthSireToken handles SIRE-TOKEN (JWT) authentication.
+// The client sends: AUTH SIRE-TOKEN <base64-encoded-jwt>
+func (s *Session) handleAuthSireToken(parts []string) error {
+	if s.jwtValidator == nil {
+		return s.writeResponse(504, "SIRE-TOKEN authentication not configured")
+	}
+
+	if len(parts) != 3 {
+		return s.writeResponse(501, "Syntax error: AUTH SIRE-TOKEN requires a token argument")
+	}
+
+	tokenBytes, err := base64.StdEncoding.DecodeString(parts[2])
+	if err != nil {
+		s.logger.Warn("Invalid base64 encoding in AUTH SIRE-TOKEN", "error", err)
+		return s.writeResponse(501, "Invalid base64 encoding")
+	}
+
+	subject, err := s.jwtValidator.AuthenticateToken(string(tokenBytes))
+	if err != nil {
+		s.logger.Warn("JWT authentication failed", "error", err)
+		return s.writeResponse(535, "Authentication credentials invalid")
+	}
+
+	s.logger.Info("JWT authentication successful", "subject", subject)
 	s.auth = true
 	return s.writeResponse(235, "Authentication successful")
 }

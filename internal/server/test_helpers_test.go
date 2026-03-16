@@ -151,7 +151,7 @@ func runSessionTest(t *testing.T, testFunc func(clientConn *mockConn, serverSess
 
 	errChan := make(chan error, 1)
 	session := &Session{}
-	session.Reset(serverConn, testQueue, nil, testUserStore, nil, testSessionLogger, "test-session-"+t.Name())
+	session.Reset(serverConn, testQueue, nil, testUserStore, nil, nil, testSessionLogger, "test-session-"+t.Name())
 
 	go func() {
 		defer func() {
