@@ -1,10 +1,10 @@
 package auth
 
 import (
-	"crypto/rand"
-	"crypto/subtle"
 	"errors"
 	"sync"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -14,29 +14,26 @@ var (
 
 // User represents a user in the system
 type User struct {
-	Username string
-	Password []byte // Hashed password
-	Salt     []byte
+	Username     string
+	PasswordHash []byte // bcrypt hash
 }
 
 // Store is an in-memory user store
 type Store struct {
 	users   map[string]*User
 	mu      sync.RWMutex
-	Enabled bool // Track if auth is enabled for this store
-	// Add supported mechanisms if they vary per store instance
-	// mechanisms []string
+	Enabled bool
 }
 
 // NewStore creates a new user store
 func NewStore() *Store {
 	return &Store{
 		users:   make(map[string]*User),
-		Enabled: true, // Default to enabled when created? Or rely on config?
+		Enabled: true,
 	}
 }
 
-// AddUser adds a new user to the store
+// AddUser adds a new user to the store with a bcrypt-hashed password.
 func (s *Store) AddUser(username, password string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -45,45 +42,56 @@ func (s *Store) AddUser(username, password string) error {
 		return errors.New("user already exists")
 	}
 
-	// Generate salt
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
 		return err
 	}
 
-	// Hash password with salt
-	hashedPassword := hashPassword(password, salt)
-
-	user := &User{
-		Username: username,
-		Password: hashedPassword,
-		Salt:     salt,
+	s.users[username] = &User{
+		Username:     username,
+		PasswordHash: hash,
 	}
-
-	s.users[username] = user
 	return nil
 }
 
-// Authenticate verifies user credentials
-// Returns true if successful, false otherwise, and an error for system issues.
+// AddUserWithHash adds a user with a pre-computed bcrypt hash.
+func (s *Store) AddUserWithHash(username string, hash []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.users[username]; exists {
+		return errors.New("user already exists")
+	}
+
+	s.users[username] = &User{
+		Username:     username,
+		PasswordHash: hash,
+	}
+	return nil
+}
+
+// Authenticate verifies user credentials using bcrypt.
+// To prevent timing attacks on user enumeration, a dummy bcrypt compare
+// is performed when the user is not found.
 func (s *Store) Authenticate(username, password string) (bool, error) {
 	s.mu.RLock()
 	user, exists := s.users[username]
 	s.mu.RUnlock()
 
 	if !exists {
-		return false, ErrUserNotFound // Return false for user not found
+		// Perform a dummy bcrypt comparison to prevent timing-based user enumeration.
+		_ = bcrypt.CompareHashAndPassword(
+			[]byte("$2a$10$dummyhashtopreventtimingleak000000000000000000000"),
+			[]byte(password),
+		)
+		return false, ErrUserNotFound
 	}
 
-	// Hash provided password with stored salt
-	hashedPassword := hashPassword(password, user.Salt)
-
-	// Compare hashes in constant time
-	if subtle.ConstantTimeCompare(hashedPassword, user.Password) != 1 {
-		return false, ErrInvalidCredentials // Return false for invalid credentials
+	if err := bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(password)); err != nil {
+		return false, ErrInvalidCredentials
 	}
 
-	return true, nil // Return true on success
+	return true, nil
 }
 
 // IsEnabled returns true if the authentication store is configured as enabled.
@@ -95,15 +103,5 @@ func (s *Store) IsEnabled() bool {
 
 // SupportedMechanisms returns the list of SASL mechanisms supported by this store.
 func (s *Store) SupportedMechanisms() []string {
-	// For this basic store, assume PLAIN and LOGIN.
-	// This could be made configurable if needed.
 	return []string{"PLAIN", "LOGIN"}
-}
-
-// hashPassword hashes a password with a salt
-func hashPassword(password string, salt []byte) []byte {
-	// In a real implementation, use a proper password hashing function like bcrypt
-	// This is a simplified version for demonstration
-	combined := append([]byte(password), salt...)
-	return combined
 }
