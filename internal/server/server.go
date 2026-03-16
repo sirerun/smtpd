@@ -83,8 +83,9 @@ type Server struct {
 	pool      *sync.Pool
 	tlsConfig *TLSConfig
 	forceTLS  bool
-	authStore auth.AuthStore
-	plugins   []plugin.Plugin
+	authStore    auth.AuthStore
+	jwtValidator auth.JWTValidator
+	plugins      []plugin.Plugin
 	logger    *logging.Logger
 	config    *config.ServerConfig
 
@@ -576,7 +577,7 @@ func (s *Server) connectionWorker(workerID int) {
 
 			session := s.pool.Get().(*Session)
 
-			session.Reset(c, s.queue, s.tlsConfig, s.authStore, s.plugins, sessionLogger, sessionID)
+			session.Reset(c, s.queue, s.tlsConfig, s.authStore, s.jwtValidator, s.plugins, sessionLogger, sessionID)
 			session.forceTLS = s.forceTLS
 
 			// Use values from s.config (which is *config.ServerConfig)
