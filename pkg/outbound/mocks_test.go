@@ -249,17 +249,79 @@ func (m *mockDialer) DialContext(ctx context.Context, network, addr string) (net
 }
 
 // --- Mock Conn ---
+// mockConn simulates an SMTP server connection for testing.
+// It responds to SMTP protocol commands so that smtp.NewClient and Hello work.
 type mockConn struct {
 	readDeadline  time.Time
 	writeDeadline time.Time
 	closed        atomic.Bool
 	mu            sync.Mutex
+	readBuf       []byte
+	writeBuf      []byte
+	greeted       bool
 }
 
 func (m *mockConn) Read(b []byte) (n int, err error) {
-	return 0, errors.New("mock read not implemented")
+	m.mu.Lock()
+	if !m.greeted {
+		m.readBuf = append(m.readBuf, []byte("220 mock.example.com ESMTP ready\r\n")...)
+		m.greeted = true
+	}
+	if len(m.readBuf) == 0 {
+		m.mu.Unlock()
+		// Block until closed or new data arrives
+		for i := 0; i < 500; i++ {
+			if m.closed.Load() {
+				return 0, errors.New("connection closed")
+			}
+			time.Sleep(10 * time.Millisecond)
+			m.mu.Lock()
+			if len(m.readBuf) > 0 {
+				break
+			}
+			m.mu.Unlock()
+		}
+		if m.closed.Load() {
+			return 0, errors.New("connection closed")
+		}
+		// m.mu is locked here from the break
+	}
+	n = copy(b, m.readBuf)
+	m.readBuf = m.readBuf[n:]
+	m.mu.Unlock()
+	return n, nil
 }
-func (m *mockConn) Write(b []byte) (n int, err error) { return len(b), nil }
+
+func (m *mockConn) Write(b []byte) (n int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed.Load() {
+		return 0, errors.New("connection closed")
+	}
+	cmd := string(b)
+	// Generate mock SMTP responses for protocol commands
+	if len(cmd) >= 4 {
+		switch {
+		case cmd[:4] == "EHLO":
+			m.readBuf = append(m.readBuf, []byte("250-mock.example.com\r\n250 OK\r\n")...)
+		case cmd[:4] == "HELO":
+			m.readBuf = append(m.readBuf, []byte("250 mock.example.com\r\n")...)
+		case cmd[:4] == "MAIL":
+			m.readBuf = append(m.readBuf, []byte("250 OK\r\n")...)
+		case cmd[:4] == "RCPT":
+			m.readBuf = append(m.readBuf, []byte("250 OK\r\n")...)
+		case cmd[:4] == "DATA":
+			m.readBuf = append(m.readBuf, []byte("354 Go ahead\r\n")...)
+		case cmd[:4] == "QUIT":
+			m.readBuf = append(m.readBuf, []byte("221 Bye\r\n")...)
+		case cmd[:4] == "RSET":
+			m.readBuf = append(m.readBuf, []byte("250 OK\r\n")...)
+		case cmd == ".\r\n":
+			m.readBuf = append(m.readBuf, []byte("250 OK\r\n")...)
+		}
+	}
+	return len(b), nil
+}
 func (m *mockConn) Close() error                      { m.closed.Store(true); return nil }
 func (m *mockConn) LocalAddr() net.Addr {
 	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
