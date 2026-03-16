@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sirerun/smtpd/internal/logging"
-	"github.com/sirerun/smtpd/internal/message"
+	"github.com/sirerun/smtpd/pkg/message"
 
 	// "github.com/sirerun/smtpd/internal/metrics" // Unused in test file
 	"github.com/stretchr/testify/assert"
@@ -78,10 +78,16 @@ func TestQueueClose(t *testing.T) {
 	err := q.Enqueue(context.Background(),msg)
 	require.NoError(t, err)
 
+	// Drain the already-enqueued message before closing
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer drainCancel()
+	_, err = q.Dequeue(drainCtx)
+	require.NoError(t, err)
+
 	q.Close()
 
 	// Further enqueues should fail
-	err = q.Enqueue(context.Background(),msg)
+	err = q.Enqueue(context.Background(), msg)
 	assert.Error(t, err, "Enqueue after Close should return an error")
 
 	// Verify the error is specifically ErrQueueClosed
@@ -89,7 +95,7 @@ func TestQueueClose(t *testing.T) {
 		assert.Equal(t, ErrQueueClosed.Error(), err.Error(), "Expected specific error message")
 	}
 
-	// Dequeue should fail with context deadline exceeded
+	// Dequeue on closed queue should fail
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	_, err = q.Dequeue(ctx)

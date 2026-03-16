@@ -12,7 +12,7 @@ import (
 
 	"github.com/emersion/go-msgauth/dkim"
 	"github.com/sirerun/smtpd/internal/logging"
-	"github.com/sirerun/smtpd/internal/message"
+	"github.com/sirerun/smtpd/pkg/message"
 	"github.com/sirerun/smtpd/pkg/plugin"
 	"github.com/stretchr/testify/assert"
 )

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirerun/smtpd/internal/message"
+	"github.com/sirerun/smtpd/pkg/message"
 	"github.com/sirerun/smtpd/pkg/plugin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"

@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirerun/smtpd/internal/auth"
 	"github.com/sirerun/smtpd/internal/logging"
-	"github.com/sirerun/smtpd/internal/message"
+	"github.com/sirerun/smtpd/pkg/message"
 	"github.com/sirerun/smtpd/internal/metrics"
 	"github.com/sirerun/smtpd/internal/queue"
 	"github.com/sirerun/smtpd/pkg/plugin"

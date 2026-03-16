@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sirerun/smtpd/internal/logging"
-	"github.com/sirerun/smtpd/internal/message"
+	"github.com/sirerun/smtpd/pkg/message"
 	"github.com/sirerun/smtpd/internal/metrics"
 )
 
