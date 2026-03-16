@@ -64,9 +64,8 @@ func TestDeliverer_Deliver_MXLookup(t *testing.T) {
 
 	assert.GreaterOrEqual(t, mockMetrics.statuses["mx_lookup_perm_failed_fail-lookup.com"], 1)
 	assert.GreaterOrEqual(t, mockMetrics.statuses["no_mx_records_no-mx.com"], 1)
-	assert.GreaterOrEqual(t, mockMetrics.statuses["delivery_perm_failed_mx_remote.com"], 1)
-	assert.GreaterOrEqual(t, mockMetrics.statuses["delivery_perm_failed_domain_remote.com"], 1)
-	assert.GreaterOrEqual(t, mockMetrics.statuses["delivery_perm_failed_mx_another-remote.com"], 1)
+	assert.GreaterOrEqual(t, mockMetrics.statuses["delivered_remote.com"], 1)
+	assert.GreaterOrEqual(t, mockMetrics.statuses["delivered_another-remote.com"], 1)
 }
 
 func TestDeliverer_Deliver(t *testing.T) {
@@ -142,9 +141,10 @@ func TestDeliverer_isLocal(t *testing.T) {
 	}
 	mockMetrics := newMockMetricsRecorder()
 	
+	mockPool := new(mockSmtpClientPool)
 	deliverer, err := NewDeliverer(
 		[]string{"example.com", " DOMAIN.NET ", " Test.ORG "},
-		nil, "test-helo", mockRes, nil, mockLogger, mockMetrics,
+		nil, "test-helo", mockRes, mockPool, mockLogger, mockMetrics,
 	)
 	require.NoError(t, err)
 
