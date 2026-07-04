@@ -585,6 +585,7 @@ func (s *Server) connectionWorker(workerID int) {
 			session.writeTimeout = s.config.WriteTimeout
 			session.idleTimeout = s.config.IdleTimeout
 			session.maxMessageSize = s.config.MaxMessageSize
+			session.localDomains = s.config.LocalDomains
 
 			sessionLogger.Info("Handling new session")
 			if err := session.Handle(); err != nil {

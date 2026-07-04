@@ -32,6 +32,11 @@ func newTestServerWithPort(t testing.TB, tlsConfig *TLSConfig, intendedPort int)
 	cfg := config.DefaultConfig()
 	cfg.Server.ListenAddr = "127.0.0.1:0"
 	cfg.Server.Port = intendedPort
+	// TestServerMessageDelivery sends unauthenticated mail to test@to.com;
+	// treat to.com as a locally-hosted domain so that inbound delivery is
+	// accepted without auth (relay-control now rejects unauthenticated mail
+	// to any domain not in LocalDomains).
+	cfg.Server.LocalDomains = []string{"to.com"}
 	if intendedPort == 0 {
 		cfg.Server.Port = 25 // Needs a valid port for validation
 	}

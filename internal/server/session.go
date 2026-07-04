@@ -69,6 +69,11 @@ type Session struct {
 	logger       *logging.Logger
 	sessionID    string
 
+	// localDomains is the set of domains this server accepts mail for
+	// without authentication (RCPT TO's domain must match one of these, or
+	// the session must be authenticated -- see handleRcpt's relay check).
+	localDomains []string
+
 	// Timeouts and buffer management
 	readTimeout    time.Duration
 	writeTimeout   time.Duration
@@ -439,6 +444,19 @@ func (s *Session) handleRcpt(rawTo string) error {
 		s.logger.Warn("Invalid RCPT TO syntax", "raw_to", rawTo)
 		return s.writeResponse(501, "Invalid recipient address format")
 	}
+
+	// Relay control: without this, the server is an open relay -- anyone who
+	// can reach it could send mail to any destination on the internet. A
+	// session may relay to a NON-local domain only once it has authenticated
+	// (AUTH PLAIN/LOGIN/SIRE-TOKEN); mail addressed to one of this server's
+	// own localDomains is always accepted (standard inbound MX behavior). An
+	// empty localDomains list (the default) means no domain is local, so an
+	// unauthenticated session can never relay.
+	if !s.auth && !s.isLocalRecipient(recipient) {
+		s.logger.Warn("Rejecting relay attempt: unauthenticated session, non-local recipient", "recipient", recipient)
+		return s.writeResponse(550, "Relaying denied")
+	}
+
 	s.logger.Info("RCPT TO received", "recipient", recipient)
 
 	sessionInfo := &plugin.SessionInfo{
@@ -523,6 +541,22 @@ func (s *Session) handleData() error {
 
 		if bytes.HasPrefix(line, []byte("..")) {
 			line = line[1:]
+		}
+
+		// Enforce maxMessageSize before buffering: without this, a client can
+		// send an arbitrarily large (or unterminated) message body and the
+		// server buffers all of it in memory with no bound (memory DoS). Per
+		// RFC 5321 a response is only valid after the DATA terminator, so on
+		// overflow we keep reading (without buffering) until the terminator,
+		// then reject.
+		if int64(dataBuf.Len()+len(line)) > s.maxMessageSize {
+			s.logger.Warn("Rejecting message: exceeds max message size", "max_bytes", s.maxMessageSize)
+			if err := s.drainUntilDataTerminator(); err != nil {
+				return err
+			}
+			s.state = StateMail
+			s.resetTransactionState()
+			return s.writeResponse(552, "Message size exceeds fixed maximum message size")
 		}
 
 		dataBuf.Write(line)
@@ -765,6 +799,40 @@ func (s *Session) handleAuthSireToken(parts []string) error {
 // isValidEmail checks if an email address is valid
 func isValidEmail(addr string) bool {
 	return strings.Contains(addr, "@") && len(addr) > 2
+}
+
+// drainUntilDataTerminator reads and discards lines (without buffering them)
+// until the DATA terminator ".\r\n" is seen or a read error occurs. Used
+// after a message exceeds maxMessageSize: the connection must keep consuming
+// the client's remaining input to stay protocol-consistent, but must not
+// buffer any of it -- that would defeat the size guard it is enforcing.
+func (s *Session) drainUntilDataTerminator() error {
+	for {
+		line, err := s.reader.ReadBytes('\n')
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(line, []byte(".\r\n")) {
+			return nil
+		}
+	}
+}
+
+// isLocalRecipient reports whether addr's domain is one this server accepts
+// mail for without authentication (case-insensitive exact match against
+// s.localDomains). An empty localDomains list means no domain is local.
+func (s *Session) isLocalRecipient(addr string) bool {
+	at := strings.LastIndexByte(addr, '@')
+	if at < 0 {
+		return false
+	}
+	domain := addr[at+1:]
+	for _, d := range s.localDomains {
+		if strings.EqualFold(domain, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // writeResponse sends an SMTP response to the client
