@@ -26,3 +26,6 @@ coverage.out
 
 # Mac OS
 .DS_Store
+
+# Ephemeral agent outputs (reports, manifests)
+.claude/scratch/
