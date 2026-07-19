@@ -1,134 +1,174 @@
-# Mailtive SMTPd
+# smtpd
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/sirerun/smtpd.svg)](https://pkg.go.dev/github.com/sirerun/smtpd)
+[![Go Report Card](https://goreportcard.com/badge/github.com/sirerun/smtpd)](https://goreportcard.com/report/github.com/sirerun/smtpd)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-<!-- Add badges for Build Status, Code Coverage, Go Report Card etc. once CI/CD is set up -->
 
-**Mailtive SMTPd is a modern, configurable, and observable SMTP server written in Go, designed for reliability, performance, and ease of use.**
+A configurable, observable SMTP server written in Go. It accepts inbound mail on the
+standard (25) and submission (587) ports, enforces relay control and TLS, runs message
+authentication checks (SPF, DKIM, DMARC), and relays outbound mail with DKIM signing and
+retry. Structured logging, Prometheus metrics, and health endpoints are built in.
 
-Whether you need a simple mail relay, a server for development testing, or a foundation for a more complex email infrastructure, Mailtive SMTPd provides the essential features with a focus on modern practices.
+smtpd runs standalone or as the inbound MTA of the Sire mail platform (alongside `spool`
+for durable storage and `imapd` for retrieval).
 
-## Key Features
+> **Project status:** smtpd is under active hardening. Several features are wired and
+> tested; a few configuration knobs (per-connection rate limiting and IP/domain filtering)
+> are parsed but not yet enforced. See [Status and roadmap](#status-and-roadmap) before
+> relying on it for untrusted production traffic.
 
-*   **Standard & Submission Ports:** Listens on standard SMTP (default 25) and Submission (default 587) ports.
-*   **Configuration Flexibility:** Configure via a clear YAML file (`config.yaml`) or override settings with command-line flags.
-*   **TLS Security:** Secure connections using STARTTLS with configurable certificate and key files.
-*   **Authentication:** Basic file-based authentication support (PLAIN/LOGIN). *(Currently placeholder, requires implementation)*
-*   **Structured Logging:** Powerful logging built on `slog` with configurable levels (Debug, Info, Warn, Error), formats (Text, JSON), and outputs (stdout, stderr, file). Logs include useful context like service name and environment.
-*   **Observability:**
-    *   **Prometheus Metrics:** Exposes key operational metrics via a `/metrics` endpoint (configurable).
-    *   **Health Checks:** Simple `/health` endpoint for monitoring server status.
-    *   **Profiling:** Includes `net/http/pprof` endpoint (`/debug/pprof/`) for performance diagnostics.
-*   **Rate Limiting:** Basic connection rate limiting per minute. *(Currently placeholder, requires implementation)*
-*   **Extensibility:** Designed with a plugin system in mind to easily add custom functionality. *(Currently placeholder, requires implementation)*
-*   **Robustness:** Graceful shutdown handling ensures connections are terminated cleanly on signal events (SIGINT, SIGTERM).
+## Features
 
-## Getting Started
+- **Standard and submission ports.** Listens on SMTP (default 25) and Submission (default 587).
+- **STARTTLS.** Opportunistic TLS on the SMTP port; TLS can be required on submission.
+- **Authentication.** File-based users with bcrypt-hashed credentials, `AUTH PLAIN` and
+  `AUTH LOGIN`.
+- **Relay control.** Unauthenticated senders may only deliver to a configured local domain;
+  authenticated senders may relay anywhere (standard MSA/MX behavior).
+- **Message size limits.** Enforced while reading DATA, with a configurable maximum.
+- **Inbound mail authentication.** SPF, DKIM, and DMARC checking as plugins.
+- **Outbound delivery.** MX lookup, connection pooling, DKIM signing, and retry with backoff.
+- **DNS caching.** Configurable TTL, cache size, and per-message lookup limits.
+- **Observability.** Prometheus `/metrics`, a `/health` endpoint, and `net/http/pprof`.
+- **Structured logging.** `slog`-based, with configurable level, format (text/JSON), and output.
+- **Graceful shutdown.** Clean termination on SIGINT/SIGTERM.
 
-### Prerequisites
+## Install
 
-*   **Go:** Version 1.21 or later.
-
-### Installation
-
-**From Source:**
+Requires Go 1.22 or later.
 
 ```bash
+# Install the binary
 go install github.com/sirerun/smtpd/cmd/smtpd@latest
-```
 
-This will install the `smtpd` binary in your `$GOPATH/bin` directory.
-
-**(Optional) Build from Clone:**
-
-```bash
+# Or build from a clone
 git clone https://github.com/sirerun/smtpd.git
 cd smtpd
 go build ./cmd/smtpd
 ```
 
-### Configuration
+## Quick start
 
-Mailtive SMTPd uses a `config.yaml` file for configuration by default. You can specify a different path using the `-config` flag. Command-line flags can override any setting in the config file.
+```bash
+# Run with a config file
+smtpd -config /etc/smtpd/config.yaml
 
-**Example `config.yaml`:**
+# Run with flag overrides (flags override config-file values)
+smtpd -config /etc/smtpd/config.yaml -port 2525 -submission-port 5870 -debug
+
+# See all flags
+smtpd -h
+```
+
+A minimal config to accept mail for a local domain over TLS with authenticated submission:
 
 ```yaml
-# config.yaml
 server:
   listen_addr: "0.0.0.0"
-  port: 2525            # Use a non-standard port for testing
-  submission_port: 5870 # Use a non-standard port for testing
-  max_connections: 100
-  max_message_size: 10485760 # 10MB
-  read_timeout: 60s
-  write_timeout: 60s
-  idle_timeout: 300s
-  shutdown_timeout: 30s
-
-logging:
-  level: "info"         # "debug", "info", "warn", "error"
-  format: "text"        # "text" or "json"
-  output: "stderr"      # "stdout", "stderr", or "/path/to/logfile.log"
-  add_source: true      # Include file:line in logs
+  port: 25
+  submission_port: 587
+  max_message_size: 33554432   # 32 MB
+  local_domains:
+    - "example.com"
 
 security:
-  tls_enabled: false    # Set to true to enable TLS
-  # tls_cert_file: /path/to/cert.pem # Required if tls_enabled is true
-  # tls_key_file: /path/to/key.pem   # Required if tls_enabled is true
-  # rate_limit: 100     # Max connections per source IP per minute (Placeholder)
+  tls_enabled: true
+  tls_cert_file: "/etc/smtpd/cert.pem"
+  tls_key_file: "/etc/smtpd/key.pem"
 
 auth:
-  enabled: false        # Set to true to enable authentication
-  # users_file: /path/to/users.db  # Path to auth database (Placeholder)
+  enabled: true
+  users_file: "/etc/smtpd/users.json"
+  auth_methods: ["PLAIN", "LOGIN"]
 
 metrics:
   enabled: true
-  listen_addr: ":9090"
+  listen_addr: "0.0.0.0:9090"
   metrics_path: "/metrics"
-
-# plugins:             # Placeholder for plugin configuration
-#   spam_filter:
-#     enabled: true
-#     threshold: 5.0
 ```
 
-### Running the Server
+A fuller example lives at [`config/smtpd.yaml`](config/smtpd.yaml). The complete field
+reference is in [`docs/configuration.md`](docs/configuration.md).
 
-1.  **Create a configuration file** (e.g., `config.yaml`) based on the example above. Adjust paths and settings as needed.
-2.  **Run the binary:**
+## Configuration
 
-    ```bash
-    # Using default config.yaml in the current directory
-    smtpd
+Configuration is loaded from a YAML file (`-config`), then command-line flags override
+individual values. The `-debug` flag forces the log level to `debug`.
 
-    # Specifying a config file path
-    smtpd -config /etc/smtpd/config.yaml
+Top-level sections: `server`, `auth`, `security`, `logging`, `metrics`, `plugins`,
+`outbound`, `dns`, `dmarc_reporting`. Every field and default is documented in
+[`docs/configuration.md`](docs/configuration.md).
 
-    # Overriding config file settings with flags
-    smtpd -config /etc/smtpd/config.yaml -port 25 -debug
-    ```
+Common CLI flags:
 
-    Use `smtpd -h` to see all available command-line flags and their defaults.
+| Flag | Description |
+|------|-------------|
+| `-config` | Path to the YAML config file |
+| `-debug` | Force debug logging |
+| `-listen-addr`, `-port`, `-submission-port` | Listener address and ports |
+| `-max-connections`, `-max-message-size` | Connection and message limits |
+| `-read-timeout`, `-write-timeout`, `-idle-timeout`, `-shutdown-timeout` | Timeouts |
+| `-auth-enabled`, `-auth-users-file` | Authentication |
+| `-tls-enabled`, `-tls-cert-file`, `-tls-key-file` | TLS |
+| `-metrics-enabled`, `-metrics-addr`, `-metrics-path` | Metrics server |
 
-## Configuration Details
+## Observability
 
-*(This section can be expanded with detailed explanations for each configuration parameter)*
+- **Metrics:** Prometheus exposition at the configured `metrics_path` (default `/metrics`
+  on `:9090`). Connection counts, command timings, message status, and queue depth.
+- **Health:** `/health` returns the server's status for liveness/readiness probes.
+- **Profiling:** `net/http/pprof` is mounted under `/debug/pprof/` on the metrics server.
 
-### Command-Line Flags vs. Config File
+## Architecture
 
-*   The server first loads the configuration file specified by `-config` (or attempts to load `config.yaml` if the flag is not provided).
-*   Then, it parses command-line flags. Any flag provided will **override** the corresponding value loaded from the configuration file.
-*   The `-debug` flag specifically overrides the logging level to "debug".
+smtpd is organized as an inbound SMTP front end plus an outbound relay:
 
-## Contributing
+- `internal/server` -- connection handling and the SMTP session state machine.
+- `internal/plugins/{spf,dkim,dmarc}` -- inbound mail authentication.
+- `internal/queue`, `internal/processor` -- accepted-message queue and delivery workers.
+- `pkg/outbound` -- outbound SMTP client, MX resolution, connection pool, DKIM signing.
+- `internal/dns` -- caching DNS resolver.
+- `internal/{config,auth,security,metrics,health,logging}` -- supporting subsystems.
 
-Contributions are welcome! Please refer to the `CONTRIBUTING.md` file (to be created) for guidelines on reporting issues, submitting pull requests, and code style.
+As part of the Sire mail platform, inbound mail for local mailboxes is intended to be stored
+durably in the `spool` service and read back by `imapd`; see
+[`docs/adr/001-durable-inbound-persistence-via-spool.md`](docs/adr/001-durable-inbound-persistence-via-spool.md).
+
+## Documentation
+
+- [`docs/configuration.md`](docs/configuration.md) -- full configuration reference.
+- [`docs/operations.md`](docs/operations.md) -- running, TLS, users, observability, shutdown.
+- [`docs/plan.md`](docs/plan.md) -- remediation and hardening plan.
+- [`docs/roadmap.md`](docs/roadmap.md) -- what is planned, in progress, and done.
+- [`docs/adr/`](docs/adr/) -- architecture decision records.
+
+## Status and roadmap
+
+smtpd is being hardened for production per [`docs/plan.md`](docs/plan.md). Notable items
+that are configuration-visible but **not yet enforced**, so do not rely on them today:
+
+- Per-connection rate limiting and IP/domain allow/block lists (`security.rate_limit`,
+  `allowed_ips`, `blocked_ips`, `allowed_domains`, `blocked_domains`) are parsed but not
+  yet wired into the accept path.
+- Durable persistence of accepted mail is in progress; the current queue is in-memory.
+
+Track progress in [`docs/roadmap.md`](docs/roadmap.md).
+
+## Development
+
+```bash
+go test ./...          # run the suite
+go test ./... -race    # run with the race detector (recommended)
+go vet ./...
+```
+
+Contributions are welcome. Please open an issue to discuss substantial changes first, keep
+commits small and focused, and ensure `go test ./... -race` and `go vet ./...` pass.
 
 ## License
 
-This project is licensed under the **Apache License 2.0**. See the [LICENSE](LICENSE) file for details.
+Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Support
 
-Please report bugs or request features using the [GitHub Issues](https://github.com/sirerun/smtpd/issues) tracker. 
+Report bugs and request features via [GitHub Issues](https://github.com/sirerun/smtpd/issues).
