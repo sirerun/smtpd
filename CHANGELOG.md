@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/sirerun/smtpd/compare/v1.1.0...v1.1.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* enforce relay control and message size limit ([26e46e9](https://github.com/sirerun/smtpd/commit/26e46e9fa377f5aff9199165e6d50641e3c2d425))
+
 ## [1.1.0](https://github.com/sirerun/smtpd/compare/v1.0.0...v1.1.0) (2026-04-15)
 
 
