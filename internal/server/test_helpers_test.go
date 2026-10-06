@@ -150,13 +150,16 @@ func (p *mockPlugin) OnData(ctx context.Context, data []byte, remoteAddr net.Add
 }
 
 // Helper to run session tests
-func runSessionTest(t *testing.T, testFunc func(clientConn *mockConn, serverSession *Session)) {
+func runSessionTest(t *testing.T, configure func(*Session), testFunc func(clientConn *mockConn, serverSession *Session)) {
+	t.Helper()
 	clientConn, serverConn := newMockConn()
 	defer clientConn.Close()
 
 	errChan := make(chan error, 1)
 	session := &Session{}
 	session.Reset(serverConn, testQueue, nil, testUserStore, nil, nil, testSessionLogger, "test-session-"+t.Name())
+	// Configure before Handle starts: its greeting already reads the timeouts.
+	configure(session)
 
 	go func() {
 		defer func() {

@@ -8,12 +8,13 @@ import (
 )
 
 func TestSessionHandleGreetingAndQuit(t *testing.T) {
-	runSessionTest(t, func(clientConn *mockConn, session *Session) {
+	runSessionTest(t, func(session *Session) {
 		session.readTimeout = 5 * time.Second
 		session.writeTimeout = 5 * time.Second
 		session.idleTimeout = 10 * time.Second
 		session.maxMessageSize = 32 * 1024 * 1024
 
+	}, func(clientConn *mockConn, _ *Session) {
 		readExpected(t, clientConn.reader, "220")
 		writeCmd(t, clientConn, "EHLO test.com")
 		readEHLO(t, clientConn.reader)
@@ -23,7 +24,7 @@ func TestSessionHandleGreetingAndQuit(t *testing.T) {
 }
 
 func TestSessionHandleFullTransaction(t *testing.T) {
-	runSessionTest(t, func(clientConn *mockConn, session *Session) {
+	runSessionTest(t, func(session *Session) {
 		session.readTimeout = 5 * time.Second
 		session.writeTimeout = 5 * time.Second
 		session.idleTimeout = 10 * time.Second
@@ -33,6 +34,7 @@ func TestSessionHandleFullTransaction(t *testing.T) {
 		// the non-local / cross-domain cases.
 		session.localDomains = []string{"test.com"}
 
+	}, func(clientConn *mockConn, _ *Session) {
 		readExpected(t, clientConn.reader, "220")
 		writeCmd(t, clientConn, "EHLO client.test")
 		readEHLO(t, clientConn.reader)
@@ -59,13 +61,14 @@ func TestSessionHandleFullTransaction(t *testing.T) {
 // test for the open-relay defect: an unauthenticated session must not be
 // able to relay mail to a domain this server does not host.
 func TestSessionRelayDenied_UnauthenticatedNonLocalRecipient(t *testing.T) {
-	runSessionTest(t, func(clientConn *mockConn, session *Session) {
+	runSessionTest(t, func(session *Session) {
 		session.readTimeout = 5 * time.Second
 		session.writeTimeout = 5 * time.Second
 		session.idleTimeout = 10 * time.Second
 		session.maxMessageSize = 32 * 1024 * 1024
 		session.localDomains = []string{"sire.run"}
 
+	}, func(clientConn *mockConn, _ *Session) {
 		readExpected(t, clientConn.reader, "220")
 		writeCmd(t, clientConn, "EHLO client.test")
 		readEHLO(t, clientConn.reader)
@@ -85,13 +88,14 @@ func TestSessionRelayDenied_UnauthenticatedNonLocalRecipient(t *testing.T) {
 // mail addressed to a domain this server hosts is accepted without auth
 // (standard inbound MX behavior).
 func TestSessionRelayAllowed_UnauthenticatedLocalRecipient(t *testing.T) {
-	runSessionTest(t, func(clientConn *mockConn, session *Session) {
+	runSessionTest(t, func(session *Session) {
 		session.readTimeout = 5 * time.Second
 		session.writeTimeout = 5 * time.Second
 		session.idleTimeout = 10 * time.Second
 		session.maxMessageSize = 32 * 1024 * 1024
 		session.localDomains = []string{"sire.run"}
 
+	}, func(clientConn *mockConn, _ *Session) {
 		readExpected(t, clientConn.reader, "220")
 		writeCmd(t, clientConn, "EHLO client.test")
 		readEHLO(t, clientConn.reader)
@@ -111,7 +115,7 @@ func TestSessionRelayAllowed_UnauthenticatedLocalRecipient(t *testing.T) {
 // case: an authenticated session (e.g. a legitimate user submitting outbound
 // mail) may relay to any domain, matching standard MSA submission behavior.
 func TestSessionRelayAllowed_AuthenticatedNonLocalRecipient(t *testing.T) {
-	runSessionTest(t, func(clientConn *mockConn, session *Session) {
+	runSessionTest(t, func(session *Session) {
 		session.readTimeout = 5 * time.Second
 		session.writeTimeout = 5 * time.Second
 		session.idleTimeout = 10 * time.Second
@@ -119,6 +123,7 @@ func TestSessionRelayAllowed_AuthenticatedNonLocalRecipient(t *testing.T) {
 		session.localDomains = []string{"sire.run"}
 		session.auth = true
 
+	}, func(clientConn *mockConn, _ *Session) {
 		readExpected(t, clientConn.reader, "220")
 		writeCmd(t, clientConn, "EHLO client.test")
 		readEHLO(t, clientConn.reader)
@@ -138,13 +143,14 @@ func TestSessionRelayAllowed_AuthenticatedNonLocalRecipient(t *testing.T) {
 // defect: handleData must enforce maxMessageSize while reading, not buffer an
 // unbounded body. Uses a tiny limit so the test body itself stays small.
 func TestSessionData_ExceedsMaxMessageSizeRejected(t *testing.T) {
-	runSessionTest(t, func(clientConn *mockConn, session *Session) {
+	runSessionTest(t, func(session *Session) {
 		session.readTimeout = 5 * time.Second
 		session.writeTimeout = 5 * time.Second
 		session.idleTimeout = 10 * time.Second
 		session.maxMessageSize = 16 // bytes
 		session.localDomains = []string{"test.com"}
 
+	}, func(clientConn *mockConn, _ *Session) {
 		readExpected(t, clientConn.reader, "220")
 		writeCmd(t, clientConn, "EHLO client.test")
 		readEHLO(t, clientConn.reader)
