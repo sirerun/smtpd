@@ -23,14 +23,16 @@ before resubmitting; a blind retry can produce duplicates.
 
 ## Build and connect
 
-Requires Go 1.24 or later (the MCP SDK minimum; see `go.mod`).
+Requires Go 1.25 or later (the MCP SDK minimum; see `go.mod`).
 
 ```sh
 go build -o /path/to/bin/smtpd-mcp ./cmd/smtpd-mcp
+# Or install from a published revision:
+# go install github.com/sirerun/smtpd/cmd/smtpd-mcp@latest
 ```
 
-Configuration examples and the complete flag reference are added with the binary's
-final interface below.
+See [client configuration](#client-configuration) below; `smtpd-mcp --help` lists all
+flags. Sending is disabled by default.
 
 The MCP client launches the binary as a subprocess and speaks JSON-RPC on stdin and
 stdout. Diagnostics use stderr. No HTTP listener is opened. Treat access to a
@@ -95,3 +97,47 @@ entrypoint can reuse it, but must first define caller authentication and authori
 origin validation, per-caller sender permissions, durable shared send controls, and
 an exposure/deployment policy. Stdio ownership is a local process boundary; it cannot
 be carried over as anonymous HTTP sending authority.
+
+## Client configuration
+
+A generic MCP client entry (replace the executable path and example addresses):
+
+```json
+{
+  "mcpServers": {
+    "smtpd": {
+      "command": "/path/to/bin/smtpd-mcp",
+      "args": [
+        "--smtp-host", "smtp.example.com:587",
+        "--from", "workshops@example.com",
+        "--smtp-user", "workshops@example.com"
+      ]
+    }
+  }
+}
+```
+
+This configuration starts in preview-only mode. To authorize actual submissions,
+add `--enable-send` and supply `SMTPD_MCP_PASSWORD` through the client's secure
+process environment. Do not put credentials in prompts, tool arguments, or source
+control. Each client starts its own process; this does not provide a shared daily cap.
+
+The default SMTP transport is STARTTLS. For this daemon's implicit-TLS listener,
+add `--smtp-tls-mode implicit`. For a local certificate, use `--tls-ca-file` with a
+trusted CA bundle and `--tls-server-name` matching the certificate name. Certificate
+verification remains enabled. `--allow-plaintext-loopback` is intended only for
+explicit local test sinks, using a loopback IP literal.
+
+Example tool arguments:
+
+```json
+{
+  "to": "person@example.net",
+  "subject": "Workshop scope",
+  "text": "Hello, here is the workshop scope we discussed."
+}
+```
+
+Use these arguments with `smtpd_preview_email`, inspect the result, and invoke
+`smtpd_send_email` only when the recipient and content are authorized. A preview is
+not an approval token or reservation; it does not bind a later send call.

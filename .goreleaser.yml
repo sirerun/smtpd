@@ -1,7 +1,8 @@
 version: 2
 
 builds:
-  - main: ./cmd/smtpd
+  - id: smtpd
+    main: ./cmd/smtpd
     env:
       - CGO_ENABLED=0
     goos:
@@ -13,6 +14,21 @@ builds:
       - arm64
     ldflags:
       - -s -w -X main.version={{.Version}}
+
+  - id: smtpd-mcp
+    main: ./cmd/smtpd-mcp
+    binary: smtpd-mcp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
 
 archives:
   - formats:

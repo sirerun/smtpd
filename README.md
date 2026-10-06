@@ -36,7 +36,7 @@ for durable storage and `imapd` for retrieval).
 
 ## Install
 
-Requires Go 1.24 or later.
+Requires Go 1.25 or later.
 
 ```bash
 # Install the binary
