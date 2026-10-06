@@ -31,11 +31,12 @@ for durable storage and `imapd` for retrieval).
 - **DNS caching.** Configurable TTL, cache size, and per-message lookup limits.
 - **Observability.** Prometheus `/metrics`, a `/health` endpoint, and `net/http/pprof`.
 - **Structured logging.** `slog`-based, with configurable level, format (text/JSON), and output.
+- **Agent tools.** A separate stdio MCP server provides email preview and SMTP submission; see [MCP setup](docs/mcp.md).
 - **Graceful shutdown.** Clean termination on SIGINT/SIGTERM.
 
 ## Install
 
-Requires Go 1.22 or later.
+Requires Go 1.24 or later.
 
 ```bash
 # Install the binary
@@ -136,6 +137,7 @@ durably in the `spool` service and read back by `imapd`; see
 
 ## Documentation
 
+- [`docs/mcp.md`](docs/mcp.md) -- stdio MCP tools, agent configuration, and sending boundaries.
 - [`docs/configuration.md`](docs/configuration.md) -- full configuration reference.
 - [`docs/operations.md`](docs/operations.md) -- running, TLS, users, observability, shutdown.
 - [`docs/plan.md`](docs/plan.md) -- remediation and hardening plan.

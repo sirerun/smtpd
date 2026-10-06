@@ -1,5 +1,6 @@
 # smtpd Documentation
 
+- [mcp.md](mcp.md) -- stdio MCP email tools and operational boundaries.
 - [configuration.md](configuration.md) -- full configuration field reference and CLI flags.
 - [operations.md](operations.md) -- running the server, TLS, users, relay control,
   observability, and shutdown.
@@ -10,5 +11,6 @@
   - [002](adr/002-outbound-relay-queue-durability.md) -- outbound relay queue durability and per-recipient state.
   - [003](adr/003-mail-authentication-advisory-to-dmarc.md) -- SPF/DKIM advisory, DMARC decides.
   - [004](adr/004-ci-race-lint-vuln-gates.md) -- CI runs race detector, linter, and vuln scanner.
+  - [005](adr/005-mcp-smtp-submission.md) -- MCP submits through the configured SMTP endpoint.
 
 For an overview and quick start, see the top-level [README](../README.md).
