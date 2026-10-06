@@ -42,13 +42,13 @@ func TestMCPToolsRegisteredAndPreviewIsNetworkFree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer serverSession.Close()
+	defer func() { _ = serverSession.Close() }()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, nil)
 	clientSession, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer clientSession.Close()
+	defer func() { _ = clientSession.Close() }()
 	tools, err := clientSession.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
 		t.Fatal(err)
@@ -273,8 +273,8 @@ func startFakeSMTPListener(t *testing.T, listener net.Listener, behavior smtpBeh
 		if e != nil {
 			return
 		}
-		defer conn.Close()
-		var netConn net.Conn = conn
+		defer func() { _ = conn.Close() }()
+		netConn := conn
 		if tlsConn, ok := conn.(*tls.Conn); ok {
 			if tlsConn.Handshake() != nil {
 				return
@@ -282,7 +282,7 @@ func startFakeSMTPListener(t *testing.T, listener net.Listener, behavior smtpBeh
 			netConn = tlsConn
 		}
 		tp := textproto.NewConn(netConn)
-		defer tp.Close()
+		defer func() { _ = tp.Close() }()
 		_ = tp.PrintfLine("220 test ESMTP")
 		for {
 			line, e := tp.ReadLine()

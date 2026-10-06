@@ -120,7 +120,7 @@ func (s *server) send(ctx context.Context, _ *mcp.CallToolRequest, in emailInput
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
-	result, err := s.sender.Send(ctx, Email{To: in.To, Subject: in.Subject, Text: in.Text, ReplyTo: in.ReplyTo})
+	result, err := s.sender.Send(ctx, Email(in))
 	if err != nil {
 		return nil, emailOutput{}, err
 	}
@@ -253,7 +253,7 @@ func (s *SMTPSender) Send(ctx context.Context, mail Email) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid recipient address: %w", err)
 	}
-	if err := validateEmail(emailInput{To: mail.To, Subject: mail.Subject, Text: mail.Text, ReplyTo: mail.ReplyTo}); err != nil {
+	if err := validateEmail(emailInput(mail)); err != nil {
 		return "", err
 	}
 	message, err := encodeMessage(from, mail)
@@ -271,7 +271,7 @@ func (s *SMTPSender) Send(ctx context.Context, mail Email) (string, error) {
 	rawConn := conn
 	stopClose := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
 	defer stopClose()
-	defer conn.Close()
+	defer func() { _ = rawConn.Close() }()
 	if s.cfg.AllowPlaintext && !securedRemoteMatches(rawConn, plainIP) {
 		return "", errors.New("SMTP connection did not reach the configured loopback IP")
 	}
@@ -301,7 +301,7 @@ func (s *SMTPSender) Send(ctx context.Context, mail Email) (string, error) {
 			secured = true
 		}
 	}
-	if !secured && !(s.cfg.AllowPlaintext && plainLoopback) {
+	if !secured && (!s.cfg.AllowPlaintext || !plainLoopback) {
 		return "", errors.New("SMTP relay did not offer STARTTLS; plaintext is allowed only with explicit opt-in to a loopback IP")
 	}
 	if s.cfg.Username != "" {
@@ -338,7 +338,7 @@ func (s *SMTPSender) Send(ctx context.Context, mail Email) (string, error) {
 }
 
 func encodeMessage(from string, in Email) ([]byte, error) {
-	if err := validateEmail(emailInput{To: in.To, Subject: in.Subject, Text: in.Text, ReplyTo: in.ReplyTo}); err != nil {
+	if err := validateEmail(emailInput(in)); err != nil {
 		return nil, err
 	}
 	to, err := parseAddress(in.To)
