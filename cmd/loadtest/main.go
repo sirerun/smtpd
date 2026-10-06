@@ -353,7 +353,7 @@ func sendMessage(client *textproto.Conn, cfg Config, connID, msgID int) error {
 
 	// Send message body
 	body := generateMessageBody(cfg.MessageSize, connID, msgID)
-	if err := client.PrintfLine(body); err != nil {
+	if err := client.PrintfLine("%s", body); err != nil {
 		return fmt.Errorf("failed to send message body: %w", err)
 	}
 
