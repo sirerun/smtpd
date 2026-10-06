@@ -39,9 +39,8 @@ stdout. Diagnostics use stderr. No HTTP listener is opened. Treat access to a
 send-enabled subprocess as authority to send mail as its configured identity.
 
 For this daemon, enable SMTP authentication and TLS, configure its users file, and
-use a trusted certificate matching the submission hostname. The current server opens
-one listener at `server.port`: when that port equals `server.submission_port`, it
-uses implicit TLS; otherwise it offers STARTTLS when TLS is configured. Match the
+use a trusted certificate matching the submission hostname. The daemon opens
+both `server.port` (STARTTLS) and `server.submission_port` (implicit TLS). Match the
 adapter TLS mode to the actual listener. Unauthenticated
 loopback access is not permission to relay externally: smtpd enforces authenticated
 relay. See [operations.md](operations.md). The MCP process does not bypass the
