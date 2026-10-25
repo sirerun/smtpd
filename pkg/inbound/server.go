@@ -302,6 +302,13 @@ func mailPath(arg string, limit int64) (string, string) {
 	return sender, ""
 }
 
+// transactionContext transfers cancellation ownership to session. The session
+// keeps only one active cancellation function, cancels it on reset, and cancels
+// the final transaction when the session exits.
+func (s *Server) transactionContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, s.cfg.TransactionTimeout)
+}
+
 func (s *Server) session(ctx context.Context, c net.Conn, ip net.IP) {
 	r := bufio.NewReaderSize(c, 4096)
 	var e Envelope
@@ -417,8 +424,9 @@ func (s *Server) session(ctx context.Context, c net.Conn, ip net.IP) {
 			e.From = from
 			mail = true
 			started = time.Now()
-			tx, stop = context.WithTimeout(ctx, s.cfg.TransactionTimeout)
+			tx, stop = s.transactionContext(ctx)
 			if !send("250 Sender accepted") {
+				reset()
 				return
 			}
 		case "RCPT":

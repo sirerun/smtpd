@@ -149,14 +149,19 @@ func (p *mockPlugin) OnData(ctx context.Context, data []byte, remoteAddr net.Add
 	return !p.rejectData, nil
 }
 
-// Helper to run session tests
-func runSessionTest(t *testing.T, testFunc func(clientConn *mockConn, serverSession *Session)) {
+// runSessionTest configures the session before Handle starts. Mutating session
+// settings from the conversation callback races with the initial greeting.
+func runSessionTest(t *testing.T, setup func(*Session), testFunc func(clientConn *mockConn)) {
 	clientConn, serverConn := newMockConn()
 	defer clientConn.Close()
 
 	errChan := make(chan error, 1)
 	session := &Session{}
 	session.Reset(serverConn, testQueue, nil, testUserStore, nil, nil, testSessionLogger, "test-session-"+t.Name())
+
+	if setup != nil {
+		setup(session)
+	}
 
 	go func() {
 		defer func() {
@@ -170,7 +175,7 @@ func runSessionTest(t *testing.T, testFunc func(clientConn *mockConn, serverSess
 		}
 	}()
 
-	testFunc(clientConn, session)
+	testFunc(clientConn)
 
 	// Check for session handler errors
 	select {
